@@ -1,8 +1,4 @@
-import { writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
-import { runCli } from "./cli-runner.js";
+import { ClaudeSession } from "./claude-session.js";
 import type { Env } from "../config/env.js";
 
 export interface Subtask {
@@ -32,68 +28,54 @@ If the task is clear:
 {"clarifications_needed": null, "plan": {"summary": "what this delivers", "subtasks": [{"id": "1", "title": "short title", "description": "what to implement", "dependencies": []}], "techStack": ["tech1"], "decisions": ["decision1"]}}`;
 
 export class CTOAgent {
-  private claudeCli: string;
-  private conversationContext: string[] = [];
+  private session: ClaudeSession;
 
   constructor(env: Env) {
-    this.claudeCli = env.CLAUDE_CLI;
+    this.session = new ClaudeSession(env.CLAUDE_CLI, [
+      "--dangerously-skip-permissions",
+    ]);
   }
 
   async analyze(userRequest: string): Promise<{
     clarifications: string[] | null;
     plan: TaskPlan | null;
   }> {
-    this.conversationContext.push(`User: ${userRequest}`);
+    // First message includes the system prompt; subsequent messages just add context
+    const prompt = this.session.isActive
+      ? userRequest
+      : `${CTO_SYSTEM_PROMPT}\n\nRequest: ${userRequest}\n\nJSON response:`;
 
-    const prompt = `${CTO_SYSTEM_PROMPT}\n\nRequest: ${this.conversationContext.join("\n")}\n\nJSON response:`;
+    console.log(`[CTO] Sending to session (active=${this.session.isActive}, ${prompt.length} chars)`);
 
-    // Write prompt to temp file to avoid shell escaping issues
-    const tmpFile = join(tmpdir(), `cto-${randomUUID()}.txt`);
-    await writeFile(tmpFile, prompt, "utf-8");
+    const result = await this.session.send(prompt, { timeoutMs: 600_000 });
 
-    console.log(`[CTO] Prompt written to ${tmpFile} (${prompt.length} chars)`);
+    console.log(`[CTO] Response (${result.durationMs}ms, $${result.costUsd.toFixed(4)}): ${result.text.slice(0, 200)}...`);
 
-    try {
-      const result = await runCli("bash", [
-        "-c",
-        `cat "${tmpFile}" | ${this.claudeCli} --print --output-format text --dangerously-skip-permissions`,
-      ], { timeoutMs: 600_000 }); // 10 min — reading large repos takes time
-
-      if (result.exitCode !== 0) {
-        throw new Error(`CTO agent failed (exit ${result.exitCode}): ${result.stderr}`);
-      }
-
-      const text = result.stdout.trim();
-      console.log(`[CTO] Response: ${text.slice(0, 200)}...`);
-      this.conversationContext.push(`CTO: ${text}`);
-
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error(`CTO agent returned non-JSON: ${text.slice(0, 200)}`);
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]) as {
-        clarifications_needed: string[] | null;
-        plan: TaskPlan | null;
-      };
-
-      return {
-        clarifications: parsed.clarifications_needed,
-        plan: parsed.plan,
-      };
-    } finally {
-      await unlink(tmpFile).catch(() => {});
+    const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error(`CTO agent returned non-JSON: ${result.text.slice(0, 200)}`);
     }
+
+    const parsed = JSON.parse(jsonMatch[0]) as {
+      clarifications_needed: string[] | null;
+      plan: TaskPlan | null;
+    };
+
+    return {
+      clarifications: parsed.clarifications_needed,
+      plan: parsed.plan,
+    };
   }
 
   async refineWithAnswers(answers: string): Promise<{
     clarifications: string[] | null;
     plan: TaskPlan | null;
   }> {
+    // Session remembers the prior context — just send the answers
     return this.analyze(answers);
   }
 
   resetConversation(): void {
-    this.conversationContext = [];
+    this.session.reset();
   }
 }
