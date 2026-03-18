@@ -2,6 +2,7 @@ import { writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import pLimit from "p-limit";
 import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 import type { Subtask } from "./cto.js";
@@ -124,12 +125,28 @@ export class WorkerAgent {
 
   async executeParallel(
     subtasks: Subtask[],
-    context: { techStack: string[]; previousFeedback?: string }
+    context: { techStack: string[]; previousFeedback?: string },
+    onWorkerDone?: (result: WorkerResult, index: number, total: number) => void | Promise<void>
   ): Promise<WorkerResult[]> {
-    console.log(`[WORKERS] Dispatching ${subtasks.length} workers in parallel`);
+    const maxConcurrent = this.env.MAX_CONCURRENT_WORKERS;
+    console.log(`[WORKERS] Dispatching ${subtasks.length} workers (max ${maxConcurrent} concurrent)`);
+
+    const limit = pLimit(maxConcurrent);
+    let doneCount = 0;
+
     const results = await Promise.all(
-      subtasks.map((subtask) => this.execute(subtask, context))
+      subtasks.map((subtask) =>
+        limit(async () => {
+          const result = await this.execute(subtask, context);
+          doneCount++;
+          if (onWorkerDone) {
+            await onWorkerDone(result, doneCount, subtasks.length);
+          }
+          return result;
+        })
+      )
     );
+
     const completed = results.filter((r) => r.status === "completed").length;
     console.log(`[WORKERS] Done: ${completed}/${subtasks.length} completed`);
     return results;
