@@ -7,13 +7,9 @@ import {
   EmbedBuilder,
 } from "discord.js";
 import { Pipeline, type PipelineEvent } from "./pipeline.js";
-import { runCli } from "../agents/cli-runner.js";
+import { ClaudeSession } from "../agents/claude-session.js";
 import type { TaskPlan } from "../agents/cto.js";
 import type { Env } from "../config/env.js";
-import { writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
 
 type SessionState =
   | { phase: "idle" }
@@ -22,47 +18,24 @@ type SessionState =
   | { phase: "executing"; pipeline: Pipeline };
 
 /**
- * Uses Claude to understand what the user means — no hardcoded keywords.
- * Pipes prompt via temp file to avoid shell argument issues with long messages.
+ * Uses Claude to classify user intent — no hardcoded keywords.
  */
 async function classifyIntent(
-  claudeCli: string,
+  classifierSession: ClaudeSession,
   userMessage: string,
   sessionPhase: string
 ): Promise<{ intent: "new_task" | "approve" | "cancel" | "clarification_answer" | "chat"; task?: string }> {
-  const prompt = `You are a message classifier. Classify the intent as ONE of: new_task, approve, cancel, clarification_answer, chat.
-
-Session state: ${sessionPhase}
-Message: "${userMessage.slice(0, 500)}"
-
-Rules:
-- "new_task" = user wants development work done
-- "approve" = user says yes/go/approve/continue/sounds good/do it/lgtm
-- "cancel" = user wants to stop
-- "clarification_answer" = user is answering a question (only when session is "clarifying")
-- "chat" = greeting, question about status, or casual conversation
-
-Respond ONLY with JSON: {"intent": "...", "task": "extracted task description if new_task"}`;
-
-  const tmpFile = join(tmpdir(), `classify-${randomUUID()}.txt`);
-  await writeFile(tmpFile, prompt, "utf-8");
+  const prompt = `Classify this message intent. Session: ${sessionPhase}. Message: "${userMessage.slice(0, 500)}"
+Rules: new_task=dev work, approve=yes/go/continue/lgtm, cancel=stop, clarification_answer=answering question (only if session=clarifying), chat=greeting/status.
+JSON only: {"intent": "...", "task": "...if new_task"}`;
 
   try {
-    const result = await runCli("bash", [
-      "-c",
-      `cat "${tmpFile}" | ${claudeCli} --print --output-format text`,
-    ], { timeoutMs: 60_000 });
-
-    if (result.exitCode !== 0) return { intent: "new_task", task: userMessage };
-
-    const match = result.stdout.match(/\{[\s\S]*\}/);
+    const result = await classifierSession.send(prompt, { timeoutMs: 60_000 });
+    const match = result.text.match(/\{[\s\S]*\}/);
     if (!match) return { intent: "new_task", task: userMessage };
     return JSON.parse(match[0]) as { intent: "new_task" | "approve" | "cancel" | "clarification_answer" | "chat"; task?: string };
   } catch {
-    // If classification fails, assume it's a new task (safe default)
     return { intent: "new_task", task: userMessage };
-  } finally {
-    await unlink(tmpFile).catch(() => {});
   }
 }
 
@@ -70,9 +43,12 @@ export class DiscordBot {
   private client: Client;
   private env: Env;
   private sessions: Map<string, SessionState> = new Map();
+  private chatSessions: Map<string, ClaudeSession> = new Map();
+  private classifierSession: ClaudeSession;
 
   constructor(env: Env) {
     this.env = env;
+    this.classifierSession = new ClaudeSession(env.CLAUDE_CLI);
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -129,7 +105,7 @@ export class DiscordBot {
       // Use Claude to understand what the user means
       console.log(`[CLASSIFY] Asking Claude to classify intent...`);
       const { intent, task } = await classifyIntent(
-        this.env.CLAUDE_CLI,
+        this.classifierSession,
         content,
         session.phase
       );
@@ -178,19 +154,20 @@ export class DiscordBot {
 
         case "chat":
         default: {
-          // Natural conversation — use Claude to respond
-          const chatPrompt = `You are Daskyleion, a CTO bot managing an AI development swarm on Discord. Be concise and helpful. Current session: ${session.phase}. User says: "${content.slice(0, 500)}"`;
-          const chatTmp = join(tmpdir(), `chat-${randomUUID()}.txt`);
-          await writeFile(chatTmp, chatPrompt, "utf-8");
-          try {
-            const chatResult = await runCli("bash", [
-              "-c", `cat "${chatTmp}" | ${this.env.CLAUDE_CLI} --print --output-format text`,
-            ], { timeoutMs: 30_000 });
-            const reply = chatResult.stdout.trim().slice(0, 1900) || "I'm here! Send me a task or @mention me to get started.";
-            await channel.send(reply);
-          } finally {
-            await unlink(chatTmp).catch(() => {});
+          // Persistent per-channel conversation — Claude remembers context
+          let chatSession = this.chatSessions.get(channel.id);
+          if (!chatSession) {
+            chatSession = new ClaudeSession(this.env.CLAUDE_CLI);
+            this.chatSessions.set(channel.id, chatSession);
           }
+
+          const chatPrompt = chatSession.isActive
+            ? content
+            : `You are Daskyleion, a CTO bot managing an AI development swarm on Discord. Be concise, helpful, and conversational. You remember everything said in this channel.\n\nUser: ${content}`;
+
+          const result = await chatSession.send(chatPrompt, { timeoutMs: 60_000 });
+          const reply = result.text.slice(0, 1900) || "I'm here! Send me a task or @mention me to get started.";
+          await channel.send(reply);
           return;
         }
       }
