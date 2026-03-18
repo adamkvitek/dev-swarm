@@ -1,6 +1,7 @@
 import {
   Client,
   GatewayIntentBits,
+  Partials,
   type Message,
   type TextChannel,
   EmbedBuilder,
@@ -28,10 +29,27 @@ export class DiscordBot {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
       ],
+      partials: [Partials.Message, Partials.Channel],
+    });
+
+    // Debug: log ALL raw gateway events
+    this.client.on("raw", (event: { t: string }) => {
+      if (event.t === "MESSAGE_CREATE") {
+        console.log(`[RAW] MESSAGE_CREATE event received`);
+      }
     });
 
     this.client.on("ready", () => {
       console.log(`Bot logged in as ${this.client.user?.tag}`);
+      console.log(`Connected to ${this.client.guilds.cache.size} server(s):`);
+      for (const guild of this.client.guilds.cache.values()) {
+        console.log(`  - ${guild.name} (${guild.id})`);
+        for (const channel of guild.channels.cache.values()) {
+          if (channel.isTextBased() && "name" in channel) {
+            console.log(`    #${channel.name} (${channel.id})`);
+          }
+        }
+      }
     });
 
     this.client.on("messageCreate", (message) => {
@@ -58,12 +76,16 @@ export class DiscordBot {
     const isMention = message.mentions.has(this.client.user!);
     const isCommand = message.content.startsWith("!dev");
 
+    console.log(`[MSG] ${message.author.tag}: "${message.content}" | mention=${isMention} cmd=${isCommand}`);
+
     if (!isMention && !isCommand) return;
 
     const content = message.content
       .replace(`<@${this.client.user!.id}>`, "")
       .replace("!dev", "")
       .trim();
+
+    console.log(`[CMD] Processing: "${content}"`);
 
     const channel = message.channel as TextChannel;
     const session = this.getSession(channel.id);
@@ -91,13 +113,19 @@ export class DiscordBot {
       }
 
       // New task
+      console.log(`[NEW] Starting new task pipeline...`);
+      await channel.send(`Got it! Analyzing your request...`);
+
       const pipeline = new Pipeline(this.env, (event) =>
         this.handlePipelineEvent(channel, event)
       );
 
       this.sessions.set(channel.id, { phase: "clarifying", pipeline });
+      console.log(`[NEW] Calling pipeline.start()...`);
       await pipeline.start(content);
+      console.log(`[NEW] pipeline.start() completed`);
     } catch (error) {
+      console.error(`[ERR]`, error);
       const errMsg = error instanceof Error ? error.message : String(error);
       await channel.send(`Error: ${errMsg}`);
       this.sessions.set(channel.id, { phase: "idle" });
