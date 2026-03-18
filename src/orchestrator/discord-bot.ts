@@ -148,28 +148,47 @@ export class DiscordBot {
       }
 
       case "plan": {
-        const subtasks = event.plan.subtasks
-          .map((s) => `- **${s.title}**: ${s.description}`)
-          .join("\n");
+        const subtaskLines = event.plan.subtasks
+          .map((s, i) => `**${i + 1}. ${s.title}**\n${s.description}`)
+          .join("\n\n");
+
+        // Discord embed fields max 1024 chars, description max 4096
+        const truncate = (s: string, max: number): string =>
+          s.length <= max ? s : s.slice(0, max - 3) + "...";
 
         const embed = new EmbedBuilder()
           .setTitle("Task Plan")
-          .setDescription(event.plan.summary)
+          .setDescription(truncate(event.plan.summary, 4096))
           .addFields(
-            { name: "Subtasks", value: subtasks || "None" },
             {
               name: "Tech Stack",
-              value: event.plan.techStack.join(", ") || "TBD",
+              value: truncate(event.plan.techStack.join(", ") || "TBD", 1024),
             },
             {
               name: "Decisions",
-              value: event.plan.decisions.join("\n") || "None yet",
+              value: truncate(event.plan.decisions.join("\n") || "None yet", 1024),
             }
           )
           .setColor(0x5865f2)
           .setFooter({ text: 'Reply "approve" to start or provide feedback.' });
 
         await channel.send({ embeds: [embed] });
+
+        // Send subtasks as follow-up messages (can be long)
+        const chunks: string[] = [];
+        let current = "**Subtasks:**\n\n";
+        for (const line of subtaskLines.split("\n\n")) {
+          if (current.length + line.length + 2 > 1900) {
+            chunks.push(current);
+            current = "";
+          }
+          current += line + "\n\n";
+        }
+        if (current.trim()) chunks.push(current);
+
+        for (const chunk of chunks) {
+          await channel.send(chunk);
+        }
 
         // Update session to awaiting_approval
         const session = this.getSession(channel.id);
