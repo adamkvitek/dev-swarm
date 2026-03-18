@@ -216,10 +216,11 @@ export class WorktreeManager {
     jobId: string,
     subtaskId: string,
   ): Promise<WorktreeInfo> {
-    const shortId = jobId.slice(0, 8);
-    const dirName = `worker-${shortId}-${subtaskId}`;
+    const shortId = sanitizeBranchSegment(jobId.slice(0, 8));
+    const safeSubtaskId = sanitizeBranchSegment(subtaskId);
+    const dirName = `worker-${shortId}-${safeSubtaskId}`;
     const worktreePath = resolve(this.workspaceDir, dirName);
-    const branch = `worker/${shortId}/${subtaskId}`;
+    const branch = `worker/${shortId}/${safeSubtaskId}`;
 
     const result = await runCli(
       "git",
@@ -294,4 +295,12 @@ export class WorktreeManager {
 
 function worktreeKey(jobId: string, subtaskId: string): string {
   return `${jobId}:${subtaskId}`;
+}
+
+/**
+ * Sanitize a string for safe use as a git branch name segment.
+ * Strips anything that isn't alphanumeric, hyphens, underscores, or dots.
+ */
+function sanitizeBranchSegment(segment: string): string {
+  return segment.replace(/[^a-zA-Z0-9\-_.]/g, "").slice(0, 50) || "unknown";
 }

@@ -2,6 +2,13 @@ import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { JobManager, JobStatus } from "./job-manager.js";
 import type { ResourceGuard } from "./resource-guard.js";
+import {
+  validateRepoPath,
+  validateSubtasks,
+  validateTechStack,
+  validateSafeText,
+  ValidationError,
+} from "./validation.js";
 
 const MAX_BODY_BYTES = 1_048_576; // 1MB
 
@@ -63,15 +70,19 @@ export class HttpApi {
       // POST /jobs/workers
       if (method === "POST" && path === "/jobs/workers") {
         const body = await readBody(req);
-        const channelId = body.channelId as string | undefined;
-        const subtasks = body.subtasks as Array<{ id: string; title: string; description: string; dependencies: string[] }> | undefined;
-        const techStack = body.techStack as string[] | undefined;
-        const repoPath = body.repoPath as string | undefined;
-        const previousFeedback = body.previousFeedback as string | undefined;
 
-        if (!channelId || !subtasks || !techStack || !repoPath) {
-          return sendJson(res, 400, { error: "channelId, subtasks, techStack, and repoPath are required" });
+        // Validate all inputs before passing to business logic
+        const channelId = body.channelId;
+        if (typeof channelId !== "string" || channelId.length === 0) {
+          return sendJson(res, 400, { error: "channelId is required" });
         }
+
+        const repoPath = validateRepoPath(body.repoPath);
+        const subtasks = validateSubtasks(body.subtasks);
+        const techStack = validateTechStack(body.techStack);
+        const previousFeedback = body.previousFeedback != null
+          ? validateSafeText(body.previousFeedback, "previousFeedback", 10_000)
+          : undefined;
 
         const result = this.jobManager.createWorkerJob(
           channelId,
@@ -193,6 +204,9 @@ export class HttpApi {
 
       sendJson(res, 404, { error: "Not found" });
     } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendJson(res, 400, { error: err.message });
+      }
       console.error(`[http-api] Error handling ${method} ${path}:`, err);
       sendJson(res, 500, { error: "Internal server error" });
     }
