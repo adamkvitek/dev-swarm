@@ -56,7 +56,7 @@ export class CTOAgent {
     try {
       const result = await runCli("bash", [
         "-c",
-        `cat "${tmpFile}" | ${this.claudeCli} --print --output-format text`,
+        `cat "${tmpFile}" | ${this.claudeCli} --print --output-format text --dangerously-skip-permissions`,
       ], { timeoutMs: 180_000 });
 
       if (result.exitCode !== 0) {
