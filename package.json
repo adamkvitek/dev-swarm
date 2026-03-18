@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "discord.js": "^14.16.0",
     "dotenv": "^16.4.0",
     "p-limit": "^7.3.0",
