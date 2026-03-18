@@ -25,8 +25,14 @@ async function classifyIntent(
   userMessage: string,
   sessionPhase: string
 ): Promise<{ intent: "new_task" | "approve" | "cancel" | "clarification_answer" | "chat"; task?: string }> {
-  const prompt = `Classify this message intent. Session: ${sessionPhase}. Message: "${userMessage.slice(0, 500)}"
-Rules: new_task=dev work, approve=yes/go/continue/lgtm, cancel=stop, clarification_answer=answering question (only if session=clarifying), chat=greeting/status.
+  const prompt = `Classify intent. Session: ${sessionPhase}. Message: "${userMessage.slice(0, 500)}"
+Rules:
+- approve = message contains ANY approval (even with additional feedback/instructions). If user says "approved" or "go ahead" ANYWHERE in the message, it's approve even if they also give feedback.
+- cancel = user explicitly wants to stop/cancel
+- clarification_answer = ONLY when session=clarifying AND message is purely answering questions
+- new_task = user wants new development work (no active session, or explicitly new request)
+- chat = greeting, status question, casual
+IMPORTANT: If session=awaiting_approval and message contains approval words, ALWAYS return approve.
 JSON only: {"intent": "...", "task": "...if new_task"}`;
 
   try {

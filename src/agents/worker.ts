@@ -67,7 +67,7 @@ export class WorkerAgent {
       const result = await runCli("bash", [
         "-c",
         `cat "${tmpFile}" | ${this.claudeCli} --print --output-format text --dangerously-skip-permissions`,
-      ], { timeoutMs: 600_000 }); // 10 min per worker
+      ], { timeoutMs: 1_800_000 }); // 30 min per worker
 
       if (result.exitCode !== 0) {
         console.log(`[WORKER ${subtask.id}] Failed (exit ${result.exitCode})`);

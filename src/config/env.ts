@@ -18,7 +18,7 @@ const envSchema = z.object({
 
   // Concurrency and timeouts
   MAX_CONCURRENT_WORKERS: z.coerce.number().int().min(1).max(15).default(5),
-  PIPELINE_TIMEOUT_MS: z.coerce.number().int().min(60_000).default(1_800_000), // 30 min
+  PIPELINE_TIMEOUT_MS: z.coerce.number().int().min(60_000).default(14_400_000), // 4 hours
 });
 
 export type Env = z.infer<typeof envSchema>;
