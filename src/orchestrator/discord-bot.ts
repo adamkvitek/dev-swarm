@@ -10,6 +10,10 @@ import { Pipeline, type PipelineEvent } from "./pipeline.js";
 import { runCli } from "../agents/cli-runner.js";
 import type { TaskPlan } from "../agents/cto.js";
 import type { Env } from "../config/env.js";
+import { writeFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 
 type SessionState =
   | { phase: "idle" }
@@ -19,42 +23,46 @@ type SessionState =
 
 /**
  * Uses Claude to understand what the user means — no hardcoded keywords.
+ * Pipes prompt via temp file to avoid shell argument issues with long messages.
  */
 async function classifyIntent(
   claudeCli: string,
   userMessage: string,
   sessionPhase: string
 ): Promise<{ intent: "new_task" | "approve" | "cancel" | "clarification_answer" | "chat"; task?: string }> {
-  const prompt = `You are a message classifier for a Discord bot. The bot manages an AI development swarm.
+  const prompt = `You are a message classifier. Classify the intent as ONE of: new_task, approve, cancel, clarification_answer, chat.
 
-Current session state: ${sessionPhase}
+Session state: ${sessionPhase}
+Message: "${userMessage.slice(0, 500)}"
 
-User message: "${userMessage}"
+Rules:
+- "new_task" = user wants development work done
+- "approve" = user says yes/go/approve/continue/sounds good/do it/lgtm
+- "cancel" = user wants to stop
+- "clarification_answer" = user is answering a question (only when session is "clarifying")
+- "chat" = greeting, question about status, or casual conversation
 
-Classify the user's intent as ONE of:
-- "new_task" — user wants to start a new development task (extract the task description)
-- "approve" — user is approving/confirming a proposed plan (any form of yes/go/approve/continue/do it/sounds good/lgtm)
-- "cancel" — user wants to stop the current task
-- "clarification_answer" — user is answering questions the bot asked
-- "chat" — casual conversation, greeting, or status question
+Respond ONLY with JSON: {"intent": "...", "task": "extracted task description if new_task"}`;
 
-Respond with ONLY a JSON object: {"intent": "...", "task": "..."}
-The "task" field is only needed for "new_task" — include the extracted task description.`;
-
-  const result = await runCli(claudeCli, [
-    "--print", "--output-format", "text", prompt,
-  ], { timeoutMs: 30_000 });
-
-  if (result.exitCode !== 0) {
-    return { intent: "chat" };
-  }
+  const tmpFile = join(tmpdir(), `classify-${randomUUID()}.txt`);
+  await writeFile(tmpFile, prompt, "utf-8");
 
   try {
+    const result = await runCli("bash", [
+      "-c",
+      `cat "${tmpFile}" | ${claudeCli} --print --output-format text`,
+    ], { timeoutMs: 60_000 });
+
+    if (result.exitCode !== 0) return { intent: "new_task", task: userMessage };
+
     const match = result.stdout.match(/\{[\s\S]*\}/);
-    if (!match) return { intent: "chat" };
+    if (!match) return { intent: "new_task", task: userMessage };
     return JSON.parse(match[0]) as { intent: "new_task" | "approve" | "cancel" | "clarification_answer" | "chat"; task?: string };
   } catch {
-    return { intent: "chat" };
+    // If classification fails, assume it's a new task (safe default)
+    return { intent: "new_task", task: userMessage };
+  } finally {
+    await unlink(tmpFile).catch(() => {});
   }
 }
 
@@ -171,20 +179,29 @@ export class DiscordBot {
         case "chat":
         default: {
           // Natural conversation — use Claude to respond
-          const chatResult = await runCli(this.env.CLAUDE_CLI, [
-            "--print", "--output-format", "text",
-            `You are Daskyleion, a CTO bot managing an AI development swarm on Discord. Be concise and helpful. Current session: ${session.phase}. User says: "${content}"`,
-          ], { timeoutMs: 30_000 });
-
-          const reply = chatResult.stdout.trim().slice(0, 1900) || "I'm here! Send me a task or @mention me to get started.";
-          await channel.send(reply);
+          const chatPrompt = `You are Daskyleion, a CTO bot managing an AI development swarm on Discord. Be concise and helpful. Current session: ${session.phase}. User says: "${content.slice(0, 500)}"`;
+          const chatTmp = join(tmpdir(), `chat-${randomUUID()}.txt`);
+          await writeFile(chatTmp, chatPrompt, "utf-8");
+          try {
+            const chatResult = await runCli("bash", [
+              "-c", `cat "${chatTmp}" | ${this.env.CLAUDE_CLI} --print --output-format text`,
+            ], { timeoutMs: 30_000 });
+            const reply = chatResult.stdout.trim().slice(0, 1900) || "I'm here! Send me a task or @mention me to get started.";
+            await channel.send(reply);
+          } finally {
+            await unlink(chatTmp).catch(() => {});
+          }
           return;
         }
       }
     } catch (error) {
       console.error(`[ERR]`, error);
       const errMsg = error instanceof Error ? error.message : String(error);
-      await channel.send(`Error: ${errMsg.slice(0, 1900)}`);
+      // Don't leak internal prompts — show a clean error
+      const cleanErr = errMsg.includes("timed out")
+        ? "Request timed out — the task may be too complex. Try a simpler request."
+        : errMsg.slice(0, 200);
+      await channel.send(`Something went wrong: ${cleanErr}`);
       this.sessions.set(channel.id, { phase: "idle" });
     }
   }
