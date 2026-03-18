@@ -278,7 +278,20 @@ export class DiscordBot {
         break;
 
       case "workers_started":
-        await channel.send(`Dispatching ${event.subtaskCount} worker(s)...`);
+        await channel.send(`Dispatching ${event.subtaskCount} worker(s) (max ${this.env.MAX_CONCURRENT_WORKERS} concurrent)...`);
+        break;
+
+      case "worker_completed":
+        await channel.send(
+          `Worker ${event.index}/${event.total} done: **${event.subtaskTitle}** — ${event.status}`
+        );
+        break;
+
+      case "pipeline_timeout":
+        await channel.send(
+          `**Pipeline timeout reached.** ${event.completedWorkers}/${event.totalWorkers} workers finished before time ran out.`
+        );
+        this.sessions.set(channel.id, { phase: "idle" });
         break;
 
       case "workers_completed": {
