@@ -67,6 +67,7 @@ export class WorkerAgent {
     const result = await runCli(this.claudeCli, [
       "--print",
       "--output-format", "text",
+      "--dangerously-skip-permissions",
       promptParts.join("\n"),
     ], { timeoutMs: 300_000 });
 
