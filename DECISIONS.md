@@ -120,3 +120,16 @@
 **Why:** Users may have multiple repos and reference different ones in different requests. Auto-detection would be fragile and could write to the wrong repo. Explicit path is unambiguous.
 **Trade-offs:** Users must include the repo path in their message. Claude needs to extract it correctly.
 **Revisit if:** The bot is scoped to a single repo per server/channel, making the path redundant.
+
+---
+
+## 2026-03-18 — Layered self-modification guardrails for recursive safety
+**Chosen:** Four-layer defense when agents target the bot's own codebase:
+1. **Deterministic path validation** (`control-plane.ts`) — checks changed files against a protected path list before merge. Not prompt-based — prompts are suggestions, this is enforcement.
+2. **Self-repo detection** (`isSelfRepo()`) — detects when the target repo is dev-swarm itself using distinctive file fingerprinting. Triggers restricted worker prompts and pre-merge validation.
+3. **Prompt-level restrictions** (`SELF_REPO_WORKER_ADDENDUM`) — warns workers about control plane boundaries. Unreliable on its own (LLMs don't always follow instructions), but useful as a first signal that reduces violations.
+4. **CODEOWNERS** — requires @adamkvitek review for all control plane paths. Git-level enforcement independent of the bot's own code.
+**Alternatives:** Single-layer prompt-only restrictions (unreliable — LLMs follow instructions probabilistically). Blanket block on self-modification (too restrictive — legitimate use case to add features to the bot). Separate repo for the bot (cleanest but adds operational complexity).
+**Why:** Self-modification is a recursive risk — if a worker breaks the bot, the system that manages agents is broken. The runaway agent incident (60GB memory, uncontrolled writes) demonstrated this isn't theoretical. Defense must be deterministic (not prompt-based), layered (no single point of failure), and allow the legitimate use case of proposing bot improvements for human review.
+**Trade-offs:** Adds validation overhead on every merge when targeting self. The protected path list requires manual maintenance — new infrastructure paths must be added to CONTROL_PLANE_PATTERNS. Self-repo detection uses file fingerprinting (heuristic, not cryptographic).
+**Revisit if:** The bot moves to a separate repo from target codebases (eliminates recursive risk), or if OS-level sandboxing (macOS seatbelt / Linux bubblewrap) is added for deeper isolation.
