@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 
 export interface Subtask {
@@ -23,7 +23,7 @@ const CTO_SYSTEM_PROMPT = `You are a CTO agent. Your role is to:
 
 You NEVER write code. You decompose, delegate, and decide.
 
-Respond with a JSON object matching this structure:
+Respond ONLY with a JSON object (no markdown, no code fences) matching this structure:
 {
   "clarifications_needed": string[] | null,
   "plan": {
@@ -38,38 +38,48 @@ If you need clarifications, set "plan" to null and list your questions.
 If the task is clear, set "clarifications_needed" to null and provide the plan.`;
 
 export class CTOAgent {
-  private client: Anthropic;
-  private conversationHistory: Anthropic.MessageParam[] = [];
+  private claudeCli: string;
+  private conversationContext: string[] = [];
 
   constructor(env: Env) {
-    this.client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    this.claudeCli = env.CLAUDE_CLI;
   }
 
   async analyze(userRequest: string): Promise<{
     clarifications: string[] | null;
     plan: TaskPlan | null;
   }> {
-    this.conversationHistory.push({
-      role: "user",
-      content: userRequest,
-    });
+    this.conversationContext.push(`User request: ${userRequest}`);
 
-    const response = await this.client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
-      system: CTO_SYSTEM_PROMPT,
-      messages: this.conversationHistory,
-    });
+    const fullPrompt = [
+      CTO_SYSTEM_PROMPT,
+      "",
+      "## Conversation so far:",
+      ...this.conversationContext,
+      "",
+      "Respond with the JSON object only.",
+    ].join("\n");
 
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
+    const result = await runCli(this.claudeCli, [
+      "--print",
+      "--output-format", "text",
+      fullPrompt,
+    ], { timeoutMs: 120_000 });
 
-    this.conversationHistory.push({
-      role: "assistant",
-      content: text,
-    });
+    if (result.exitCode !== 0) {
+      throw new Error(`CTO agent failed: ${result.stderr}`);
+    }
 
-    const parsed = JSON.parse(text) as {
+    const text = result.stdout.trim();
+    this.conversationContext.push(`CTO response: ${text}`);
+
+    // Extract JSON from response (handle potential markdown fences)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error(`CTO agent returned non-JSON response: ${text.slice(0, 200)}`);
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as {
       clarifications_needed: string[] | null;
       plan: TaskPlan | null;
     };
@@ -88,6 +98,6 @@ export class CTOAgent {
   }
 
   resetConversation(): void {
-    this.conversationHistory = [];
+    this.conversationContext = [];
   }
 }

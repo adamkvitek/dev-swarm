@@ -5,12 +5,13 @@ config();
 
 const envSchema = z.object({
   // Required
-  ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY is required"),
-  OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
   DISCORD_BOT_TOKEN: z.string().min(1, "DISCORD_BOT_TOKEN is required"),
 
-  // Optional
-  PERPLEXITY_API_KEY: z.string().optional(),
+  // CLI paths (uses existing subscriptions)
+  CLAUDE_CLI: z.string().default("claude"),
+  CODEX_CLI: z.string().default("codex"),
+
+  // Review loop config
   MAX_REVIEW_ITERATIONS: z.coerce.number().int().min(1).max(20).default(10),
   REVIEW_QUALITY_THRESHOLD: z.coerce.number().int().min(1).max(10).default(8),
   WORKSPACE_DIR: z.string().default("~/dev/swarm-workspace"),

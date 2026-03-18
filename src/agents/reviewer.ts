@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 import type { WorkerResult } from "./worker.js";
 
@@ -19,7 +19,7 @@ export interface ReviewResult {
   iteration: number;
 }
 
-const REVIEWER_SYSTEM_PROMPT = `You are a senior code reviewer (Codex). You review code produced by a development team.
+const REVIEWER_SYSTEM_PROMPT = `You are a senior code reviewer. You review code produced by a development team.
 
 Score each criterion from 1-10:
 - **Correctness**: Does the code do what was asked? Are there bugs?
@@ -28,7 +28,7 @@ Score each criterion from 1-10:
 - **Security**: Any vulnerabilities? Input validation? Injection risks?
 - **Completeness**: Is the full task implemented? Any missing pieces?
 
-Respond with a JSON object:
+Respond ONLY with a JSON object (no markdown, no code fences):
 {
   "verdict": "APPROVE" | "REVISE",
   "scores": {
@@ -48,11 +48,11 @@ Set verdict to "APPROVE" if the average score >= the quality threshold.
 Be rigorous but fair. Point out specific issues with file paths and line references.`;
 
 export class ReviewerAgent {
-  private client: OpenAI;
+  private codexCli: string;
   private qualityThreshold: number;
 
   constructor(env: Env) {
-    this.client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    this.codexCli = env.CODEX_CLI;
     this.qualityThreshold = env.REVIEW_QUALITY_THRESHOLD;
   }
 
@@ -68,41 +68,100 @@ export class ReviewerAgent {
       )
       .join("\n\n---\n\n");
 
-    const response = await this.client.chat.completions.create({
-      model: "o3",
-      max_completion_tokens: 8192,
-      messages: [
-        { role: "system", content: REVIEWER_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `## Task Description\n${taskDescription}\n\n## Quality Threshold\nAverage score must be >= ${this.qualityThreshold} to APPROVE.\n\n## Iteration\n${iteration} of max review cycles.\n\n## Code to Review\n${codeForReview}`,
+    const fullPrompt = [
+      REVIEWER_SYSTEM_PROMPT,
+      "",
+      `## Task Description\n${taskDescription}`,
+      `## Quality Threshold\nAverage score must be >= ${this.qualityThreshold} to APPROVE.`,
+      `## Iteration\n${iteration} of max review cycles.`,
+      `## Code to Review\n${codeForReview}`,
+      "",
+      "Respond with the JSON object only.",
+    ].join("\n\n");
+
+    const result = await runCli(this.codexCli, [
+      "exec",
+      "--full-auto",
+      fullPrompt,
+    ], { timeoutMs: 300_000 });
+
+    if (result.exitCode !== 0) {
+      // If codex fails, return a REVISE with the error
+      return {
+        verdict: "REVISE",
+        scores: {
+          correctness: 0,
+          codeQuality: 0,
+          testCoverage: 0,
+          security: 0,
+          completeness: 0,
+          average: 0,
         },
-      ],
-    });
+        feedback: `Reviewer CLI error: ${result.stderr}`,
+        issuesBySubtask: {},
+        iteration,
+      };
+    }
 
-    const text = response.choices[0]?.message?.content ?? "";
-    const parsed = JSON.parse(text) as {
-      verdict: "APPROVE" | "REVISE";
-      scores: Omit<ReviewScore, "average">;
-      feedback: string;
-      issuesBySubtask: Record<string, string[]>;
-    };
+    const text = result.stdout.trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
 
-    const scores = parsed.scores;
-    const average =
-      (scores.correctness +
-        scores.codeQuality +
-        scores.testCoverage +
-        scores.security +
-        scores.completeness) /
-      5;
+    if (!jsonMatch) {
+      return {
+        verdict: "REVISE",
+        scores: {
+          correctness: 5,
+          codeQuality: 5,
+          testCoverage: 5,
+          security: 5,
+          completeness: 5,
+          average: 5,
+        },
+        feedback: `Reviewer returned non-structured response: ${text.slice(0, 500)}`,
+        issuesBySubtask: {},
+        iteration,
+      };
+    }
 
-    return {
-      verdict: average >= this.qualityThreshold ? "APPROVE" : "REVISE",
-      scores: { ...scores, average },
-      feedback: parsed.feedback,
-      issuesBySubtask: parsed.issuesBySubtask,
-      iteration,
-    };
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        verdict: "APPROVE" | "REVISE";
+        scores: Omit<ReviewScore, "average">;
+        feedback: string;
+        issuesBySubtask: Record<string, string[]>;
+      };
+
+      const scores = parsed.scores;
+      const average =
+        (scores.correctness +
+          scores.codeQuality +
+          scores.testCoverage +
+          scores.security +
+          scores.completeness) /
+        5;
+
+      return {
+        verdict: average >= this.qualityThreshold ? "APPROVE" : "REVISE",
+        scores: { ...scores, average },
+        feedback: parsed.feedback,
+        issuesBySubtask: parsed.issuesBySubtask,
+        iteration,
+      };
+    } catch {
+      return {
+        verdict: "REVISE",
+        scores: {
+          correctness: 5,
+          codeQuality: 5,
+          testCoverage: 5,
+          security: 5,
+          completeness: 5,
+          average: 5,
+        },
+        feedback: `Failed to parse reviewer output: ${text.slice(0, 500)}`,
+        issuesBySubtask: {},
+        iteration,
+      };
+    }
   }
 }
