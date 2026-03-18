@@ -1,3 +1,7 @@
+import { writeFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 
@@ -15,27 +19,17 @@ export interface TaskPlan {
   decisions: string[];
 }
 
-const CTO_SYSTEM_PROMPT = `You are a CTO agent. Your role is to:
-1. Understand the user's request fully — ask clarifying questions if anything is ambiguous.
-2. Decompose the task into discrete, independently implementable subtasks.
-3. Identify the tech stack, architectural decisions, and dependencies.
-4. Return a structured task plan.
+const CTO_SYSTEM_PROMPT = `You are a CTO agent that decomposes development tasks.
 
-You NEVER write code. You decompose, delegate, and decide.
+Given a user request, either ask clarifying questions OR provide a task plan.
 
-Respond ONLY with a JSON object (no markdown, no code fences) matching this structure:
-{
-  "clarifications_needed": string[] | null,
-  "plan": {
-    "summary": string,
-    "subtasks": [{ "id": string, "title": string, "description": string, "dependencies": string[] }],
-    "techStack": string[],
-    "decisions": string[]
-  } | null
-}
+Respond ONLY with a JSON object. No markdown, no code fences, no explanation.
 
-If you need clarifications, set "plan" to null and list your questions.
-If the task is clear, set "clarifications_needed" to null and provide the plan.`;
+If you need clarifications:
+{"clarifications_needed": ["question 1", "question 2"], "plan": null}
+
+If the task is clear:
+{"clarifications_needed": null, "plan": {"summary": "what this delivers", "subtasks": [{"id": "1", "title": "short title", "description": "what to implement", "dependencies": []}], "techStack": ["tech1"], "decisions": ["decision1"]}}`;
 
 export class CTOAgent {
   private claudeCli: string;
@@ -49,45 +43,47 @@ export class CTOAgent {
     clarifications: string[] | null;
     plan: TaskPlan | null;
   }> {
-    this.conversationContext.push(`User request: ${userRequest}`);
+    this.conversationContext.push(`User: ${userRequest}`);
 
-    const fullPrompt = [
-      CTO_SYSTEM_PROMPT,
-      "",
-      "## Conversation so far:",
-      ...this.conversationContext,
-      "",
-      "Respond with the JSON object only.",
-    ].join("\n");
+    const prompt = `${CTO_SYSTEM_PROMPT}\n\nRequest: ${this.conversationContext.join("\n")}\n\nJSON response:`;
 
-    const result = await runCli(this.claudeCli, [
-      "--print",
-      "--output-format", "text",
-      fullPrompt,
-    ], { timeoutMs: 120_000 });
+    // Write prompt to temp file to avoid shell escaping issues
+    const tmpFile = join(tmpdir(), `cto-${randomUUID()}.txt`);
+    await writeFile(tmpFile, prompt, "utf-8");
 
-    if (result.exitCode !== 0) {
-      throw new Error(`CTO agent failed: ${result.stderr}`);
+    console.log(`[CTO] Prompt written to ${tmpFile} (${prompt.length} chars)`);
+
+    try {
+      const result = await runCli("bash", [
+        "-c",
+        `cat "${tmpFile}" | ${this.claudeCli} --print --output-format text`,
+      ], { timeoutMs: 180_000 });
+
+      if (result.exitCode !== 0) {
+        throw new Error(`CTO agent failed (exit ${result.exitCode}): ${result.stderr}`);
+      }
+
+      const text = result.stdout.trim();
+      console.log(`[CTO] Response: ${text.slice(0, 200)}...`);
+      this.conversationContext.push(`CTO: ${text}`);
+
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error(`CTO agent returned non-JSON: ${text.slice(0, 200)}`);
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        clarifications_needed: string[] | null;
+        plan: TaskPlan | null;
+      };
+
+      return {
+        clarifications: parsed.clarifications_needed,
+        plan: parsed.plan,
+      };
+    } finally {
+      await unlink(tmpFile).catch(() => {});
     }
-
-    const text = result.stdout.trim();
-    this.conversationContext.push(`CTO response: ${text}`);
-
-    // Extract JSON from response (handle potential markdown fences)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error(`CTO agent returned non-JSON response: ${text.slice(0, 200)}`);
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]) as {
-      clarifications_needed: string[] | null;
-      plan: TaskPlan | null;
-    };
-
-    return {
-      clarifications: parsed.clarifications_needed,
-      plan: parsed.plan,
-    };
   }
 
   async refineWithAnswers(answers: string): Promise<{

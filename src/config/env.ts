@@ -12,7 +12,7 @@ const envSchema = z.object({
   CODEX_CLI: z.string().default("codex"),
 
   // Review loop config
-  MAX_REVIEW_ITERATIONS: z.coerce.number().int().min(1).max(20).default(10),
+  MAX_REVIEW_ITERATIONS: z.coerce.number().int().min(1).max(5).default(3),
   REVIEW_QUALITY_THRESHOLD: z.coerce.number().int().min(1).max(10).default(8),
   WORKSPACE_DIR: z.string().default("~/dev/swarm-workspace"),
 });

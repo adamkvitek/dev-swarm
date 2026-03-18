@@ -8,12 +8,12 @@ export interface CliResult {
 
 /**
  * Spawns a CLI tool and captures its output.
- * Used to run `claude` and `codex` CLIs with the user's existing subscriptions.
+ * Sends the prompt via stdin to avoid shell argument length limits.
  */
 export function runCli(
   command: string,
   args: string[],
-  options?: { timeoutMs?: number; cwd?: string }
+  options?: { timeoutMs?: number; cwd?: string; stdin?: string }
 ): Promise<CliResult> {
   const timeoutMs = options?.timeoutMs ?? 300_000; // 5 min default
 
@@ -49,5 +49,11 @@ export function runCli(
       clearTimeout(timer);
       reject(new Error(`Failed to spawn ${command}: ${err.message}`));
     });
+
+    // Send prompt via stdin
+    if (options?.stdin) {
+      proc.stdin.write(options.stdin);
+      proc.stdin.end();
+    }
   });
 }
