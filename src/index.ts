@@ -1,26 +1,61 @@
 import { loadEnv } from "./config/env.js";
-import { DiscordBot } from "./orchestrator/discord-bot.js";
+import { DiscordAdapter } from "./adapter/discord-adapter.js";
+import { JobManager } from "./adapter/job-manager.js";
+import { HttpApi } from "./adapter/http-api.js";
+import { ResourceGuard } from "./adapter/resource-guard.js";
+import { generateMcpConfig } from "./adapter/mcp-config.js";
+import { WorkerAgent } from "./agents/worker.js";
+import { ReviewerAgent } from "./agents/reviewer.js";
+import { WorktreeManager } from "./workspace/worktree-manager.js";
 
 async function main(): Promise<void> {
   console.log("Loading configuration...");
   const env = loadEnv();
 
-  console.log("Starting Dev Swarm bot...");
-  const bot = new DiscordBot(env);
+  // 1. Worktree manager — isolated git worktrees for parallel workers
+  const worktreeManager = new WorktreeManager(env.WORKSPACE_DIR);
+  await worktreeManager.initialize();
 
-  process.on("SIGINT", () => {
-    console.log("\nShutting down...");
-    void bot.stop();
+  // 2. Agents + Job manager — owns worker/reviewer lifecycle
+  const workerAgent = new WorkerAgent(env);
+  const reviewerAgent = new ReviewerAgent(env);
+  const jobManager = new JobManager(env, workerAgent, reviewerAgent, worktreeManager);
+
+  // 3. Resource guard — memory + worker capacity checks
+  const resources = new ResourceGuard(
+    env.MEMORY_CEILING_PCT,
+    env.MAX_CONCURRENT_WORKERS,
+    () => jobManager.getActiveWorkerCount(),
+  );
+
+  // 4. HTTP API — bridge between MCP server and adapter
+  const httpApi = new HttpApi(jobManager, resources);
+  await httpApi.start(env.MCP_API_HOST, env.MCP_API_PORT);
+
+  // 5. Generate MCP config — tells Claude CLI how to spawn the MCP server
+  const mcpConfigPath = await generateMcpConfig(env.MCP_API_HOST, env.MCP_API_PORT, httpApi.token);
+
+  // 6. Discord adapter — bridges Discord <> Claude CLI
+  const adapter = new DiscordAdapter(env, jobManager, resources);
+  adapter.setMcpConfigPath(mcpConfigPath);
+
+  // 7. Wire job completion notifications -> adapter -> Claude -> Discord
+  jobManager.setOnJobComplete((job) => adapter.handleJobCompletion(job));
+
+  const shutdown = async (signal: string): Promise<void> => {
+    console.log(`\n${signal} received — shutting down...`);
+    await adapter.stop();
+    await httpApi.stop();
+    await worktreeManager.removeAll();
+    jobManager.destroy();
     process.exit(0);
-  });
+  };
 
-  process.on("SIGTERM", () => {
-    void bot.stop();
-    process.exit(0);
-  });
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  await bot.start();
-  console.log("Dev Swarm is running. Waiting for tasks in Discord...");
+  await adapter.start();
+  console.log("Dev Swarm is running. Claude is the bot with MCP tools — waiting for @mentions...");
 }
 
 main().catch((err) => {
