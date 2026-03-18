@@ -26,5 +26,8 @@ Thumbs.db
 *.log
 logs/
 
+# Generated at runtime
+mcp-config.json
+
 # OpenClaw local data
 .openclaw/
