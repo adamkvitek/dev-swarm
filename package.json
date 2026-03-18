@@ -1,0 +1,33 @@
+{
+  "name": "dev-swarm",
+  "version": "0.1.0",
+  "description": "AI dev team orchestrator —  skill for CTO/worker/reviewer swarm with Claude + Codex review loops",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "oxlint .",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.72.0",
+    "openai": "^4.80.0",
+    "discord.js": "^14.16.0",
+    "dotenv": "^16.4.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "vitest": "^3.0.0",
+    "oxlint": "^0.16.0",
+    "@types/node": "^22.0.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
