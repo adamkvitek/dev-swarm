@@ -1,0 +1,20 @@
+# Bot control plane — requires human review for all changes.
+# AI agents can propose changes via PRs, but these paths must be
+# manually reviewed and approved before merging.
+
+# Core infrastructure
+/src/adapter/          @adamkvitek
+/src/config/           @adamkvitek
+/src/index.ts          @adamkvitek
+/src/workspace/        @adamkvitek
+/src/mcp/              @adamkvitek
+/src/agents/           @adamkvitek
+
+# Safety guardrails (modifying these is privilege escalation)
+/.claude/              @adamkvitek
+/CODEOWNERS            @adamkvitek
+/.github/              @adamkvitek
+
+# Dependencies and build config
+/package.json          @adamkvitek
+/tsconfig.json         @adamkvitek

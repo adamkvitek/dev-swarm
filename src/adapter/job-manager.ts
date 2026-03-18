@@ -3,7 +3,7 @@ import type { WorkerAgent, WorkerResult } from "../agents/worker.js";
 import type { ReviewerAgent, ReviewResult } from "../agents/reviewer.js";
 import type { Subtask } from "../agents/cto.js";
 import type { Env } from "../config/env.js";
-import type { WorktreeManager } from "../workspace/worktree-manager.js";
+import type { WorktreeManager, MergeResult } from "../workspace/worktree-manager.js";
 
 export type JobType = "workers" | "review";
 export type JobStatus = "running" | "completed" | "failed" | "cancelled";
@@ -146,7 +146,14 @@ export class JobManager {
    * Merge worker branches for a job into a feature branch.
    * Called externally after an APPROVE verdict.
    */
-  async mergeJob(jobId: string, taskSummary: string): Promise<string> {
+  /**
+   * Merge worker branches for a job into a feature branch.
+   * Returns the merge result including safety validation status.
+   *
+   * If the target is the bot's own repo and control plane files were touched,
+   * the branch is created but flagged as requiring human review.
+   */
+  async mergeJob(jobId: string, taskSummary: string): Promise<MergeResult> {
     const job = this.jobs.get(jobId);
     if (!job?.repoPath) {
       throw new Error(`Job ${jobId} not found or has no repo path`);
@@ -158,14 +165,14 @@ export class JobManager {
       throw new Error(`No worker job with repo path found for ${jobId}`);
     }
 
-    const featureBranch = await this.worktreeManager.mergeToFeatureBranch(
+    const mergeResult = await this.worktreeManager.mergeToFeatureBranch(
       workerJob.repoPath,
       workerJob.id,
       taskSummary,
     );
 
-    job.featureBranch = featureBranch;
-    return featureBranch;
+    job.featureBranch = mergeResult.featureBranch;
+    return mergeResult;
   }
 
   cancelJob(jobId: string): boolean {
