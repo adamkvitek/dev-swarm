@@ -1,0 +1,39 @@
+{
+  "hello-world": {
+    "*": {
+      "assertions": [
+        { "pattern": "Hello", "mode": "string", "ignoreCase": true }
+      ]
+    }
+  },
+  "_skipReasons": {
+    "_doc": "Reference list of common skip reasons for documentation purposes",
+    "no-maven": "Sample requires Maven project structure (pom.xml) not present",
+    "no-main-class": "Java sample has no identifiable main class",
+    "maven-deps-offline": "Sample requires Maven dependencies not available offline",
+    "compile-error": "Known compilation error — awaiting fix",
+    "platform-specific": "Sample uses platform-specific APIs not available in CI",
+    "missing-sdk": "Required SDK or runtime not installed",
+    "interactive-input": "Sample requires interactive user input"
+  },
+  "_examples": {
+    "_doc": "Example entries showing skip and assertion patterns",
+    "api-client-demo": {
+      "java": {
+        "skip": true,
+        "skipReason": "Requires Maven dependencies (okhttp, gson) — use mvn project with pom.xml"
+      },
+      "csharp": {
+        "skip": true,
+        "skipReason": "Requires NuGet packages not bundled in sample"
+      },
+      "*": {
+        "assertions": [
+          { "pattern": "response", "mode": "string", "ignoreCase": true },
+          { "pattern": "Exception|Error", "mode": "regex", "invertMatch": true }
+        ],
+        "expectedExitCode": 0
+      }
+    }
+  }
+}
