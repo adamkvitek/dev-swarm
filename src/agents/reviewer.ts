@@ -1,3 +1,7 @@
+import { writeFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 import type { WorkerResult } from "./worker.js";
@@ -79,11 +83,17 @@ export class ReviewerAgent {
       "Respond with the JSON object only.",
     ].join("\n\n");
 
-    const result = await runCli(this.codexCli, [
-      "exec",
-      "--full-auto",
-      fullPrompt,
-    ], { timeoutMs: 300_000 });
+    // Write prompt to temp file to avoid shell argument issues
+    const tmpFile = join(tmpdir(), `reviewer-${randomUUID()}.txt`);
+    await writeFile(tmpFile, fullPrompt, "utf-8");
+    console.log(`[REVIEWER] Starting review (iteration ${iteration})...`);
+
+    const result = await runCli("bash", [
+      "-c",
+      `cat "${tmpFile}" | ${this.codexCli} exec --full-auto -`,
+    ], { timeoutMs: 600_000 }); // 10 min
+
+    await unlink(tmpFile).catch(() => {});
 
     if (result.exitCode !== 0) {
       // If codex fails, return a REVISE with the error

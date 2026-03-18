@@ -1,3 +1,7 @@
+import { writeFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 import type { Subtask } from "./cto.js";
@@ -10,21 +14,16 @@ export interface WorkerResult {
   blockerReason?: string;
 }
 
-const WORKER_SYSTEM_PROMPT = `You are a senior developer agent in a development swarm. You receive a specific subtask and implement it.
+const WORKER_SYSTEM_PROMPT = `You are a senior developer agent. Implement the subtask below.
 
 Rules:
 - Write clean, production-quality code.
-- Include appropriate error handling and types.
-- Follow the tech stack and patterns specified.
-- If blocked, explain what you need and return status "blocked".
+- Include error handling and types.
+- Follow the tech stack specified.
+- If blocked, explain what you need.
 
-Respond ONLY with a JSON object (no markdown, no code fences):
-{
-  "status": "completed" | "blocked",
-  "files": [{ "path": string, "content": string }],
-  "blockerReason": string | null,
-  "notes": string
-}`;
+Respond ONLY with JSON (no markdown fences):
+{"status": "completed"|"blocked", "files": [{"path": "...", "content": "..."}], "blockerReason": null, "notes": "..."}`;
 
 export class WorkerAgent {
   private claudeCli: string;
@@ -51,72 +50,75 @@ export class WorkerAgent {
 
     if (context.previousFeedback) {
       promptParts.push(
-        `\n## Reviewer Feedback (fix these issues):\n${context.previousFeedback}`
+        `\n## Reviewer Feedback (fix these):\n${context.previousFeedback}`
       );
     }
 
-    if (context.otherWorkerOutputs?.size) {
-      promptParts.push("\n## Other workers' outputs (for context):");
-      for (const [id, output] of context.otherWorkerOutputs) {
-        promptParts.push(`### ${id}:\n${output}`);
-      }
-    }
+    promptParts.push("\nJSON response:");
 
-    promptParts.push("\nRespond with the JSON object only.");
+    // Write prompt to temp file to avoid shell escaping issues
+    const tmpFile = join(tmpdir(), `worker-${subtask.id}-${randomUUID()}.txt`);
+    await writeFile(tmpFile, promptParts.join("\n"), "utf-8");
 
-    const result = await runCli(this.claudeCli, [
-      "--print",
-      "--output-format", "text",
-      "--dangerously-skip-permissions",
-      promptParts.join("\n"),
-    ], { timeoutMs: 300_000 });
-
-    if (result.exitCode !== 0) {
-      return {
-        subtaskId: subtask.id,
-        status: "blocked",
-        code: "",
-        files: [],
-        blockerReason: `CLI error: ${result.stderr}`,
-      };
-    }
-
-    const text = result.stdout.trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return {
-        subtaskId: subtask.id,
-        status: "completed",
-        code: text,
-        files: [],
-      };
-    }
+    console.log(`[WORKER ${subtask.id}] ${subtask.title} — starting`);
 
     try {
-      const parsed = JSON.parse(jsonMatch[0]) as {
-        status: "completed" | "blocked";
-        files: Array<{ path: string; content: string }>;
-        blockerReason: string | null;
-        notes: string;
-      };
+      const result = await runCli("bash", [
+        "-c",
+        `cat "${tmpFile}" | ${this.claudeCli} --print --output-format text --dangerously-skip-permissions`,
+      ], { timeoutMs: 600_000 }); // 10 min per worker
 
-      return {
-        subtaskId: subtask.id,
-        status: parsed.status,
-        code: parsed.files
-          .map((f) => `// ${f.path}\n${f.content}`)
-          .join("\n\n"),
-        files: parsed.files.map((f) => f.path),
-        blockerReason: parsed.blockerReason ?? undefined,
-      };
-    } catch {
-      // If JSON parsing fails, return raw output as code
-      return {
-        subtaskId: subtask.id,
-        status: "completed",
-        code: text,
-        files: [],
-      };
+      if (result.exitCode !== 0) {
+        console.log(`[WORKER ${subtask.id}] Failed (exit ${result.exitCode})`);
+        return {
+          subtaskId: subtask.id,
+          status: "blocked",
+          code: "",
+          files: [],
+          blockerReason: `CLI error (exit ${result.exitCode}): ${result.stderr.slice(0, 200)}`,
+        };
+      }
+
+      const text = result.stdout.trim();
+      console.log(`[WORKER ${subtask.id}] Completed (${text.length} chars)`);
+
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return {
+          subtaskId: subtask.id,
+          status: "completed",
+          code: text.slice(0, 5000),
+          files: [],
+        };
+      }
+
+      try {
+        const parsed = JSON.parse(jsonMatch[0]) as {
+          status: "completed" | "blocked";
+          files: Array<{ path: string; content: string }>;
+          blockerReason: string | null;
+          notes: string;
+        };
+
+        return {
+          subtaskId: subtask.id,
+          status: parsed.status,
+          code: parsed.files
+            .map((f) => `// ${f.path}\n${f.content}`)
+            .join("\n\n"),
+          files: parsed.files.map((f) => f.path),
+          blockerReason: parsed.blockerReason ?? undefined,
+        };
+      } catch {
+        return {
+          subtaskId: subtask.id,
+          status: "completed",
+          code: text.slice(0, 5000),
+          files: [],
+        };
+      }
+    } finally {
+      await unlink(tmpFile).catch(() => {});
     }
   }
 
@@ -124,9 +126,12 @@ export class WorkerAgent {
     subtasks: Subtask[],
     context: { techStack: string[]; previousFeedback?: string }
   ): Promise<WorkerResult[]> {
+    console.log(`[WORKERS] Dispatching ${subtasks.length} workers in parallel`);
     const results = await Promise.all(
       subtasks.map((subtask) => this.execute(subtask, context))
     );
+    const completed = results.filter((r) => r.status === "completed").length;
+    console.log(`[WORKERS] Done: ${completed}/${subtasks.length} completed`);
     return results;
   }
 }
