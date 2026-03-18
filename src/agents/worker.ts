@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 import type { Subtask } from "./cto.js";
 
@@ -18,7 +18,7 @@ Rules:
 - Follow the tech stack and patterns specified.
 - If blocked, explain what you need and return status "blocked".
 
-Respond with a JSON object:
+Respond ONLY with a JSON object (no markdown, no code fences):
 {
   "status": "completed" | "blocked",
   "files": [{ "path": string, "content": string }],
@@ -27,10 +27,10 @@ Respond with a JSON object:
 }`;
 
 export class WorkerAgent {
-  private client: Anthropic;
+  private claudeCli: string;
 
   constructor(private env: Env) {
-    this.client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    this.claudeCli = env.CLAUDE_CLI;
   }
 
   async execute(
@@ -41,49 +41,82 @@ export class WorkerAgent {
       otherWorkerOutputs?: Map<string, string>;
     }
   ): Promise<WorkerResult> {
-    const contextParts: string[] = [
+    const promptParts: string[] = [
+      WORKER_SYSTEM_PROMPT,
+      "",
       `## Subtask: ${subtask.title}`,
       subtask.description,
       `\n## Tech Stack: ${context.techStack.join(", ")}`,
     ];
 
     if (context.previousFeedback) {
-      contextParts.push(
+      promptParts.push(
         `\n## Reviewer Feedback (fix these issues):\n${context.previousFeedback}`
       );
     }
 
     if (context.otherWorkerOutputs?.size) {
-      contextParts.push("\n## Other workers' outputs (for context):");
+      promptParts.push("\n## Other workers' outputs (for context):");
       for (const [id, output] of context.otherWorkerOutputs) {
-        contextParts.push(`### ${id}:\n${output}`);
+        promptParts.push(`### ${id}:\n${output}`);
       }
     }
 
-    const response = await this.client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 8192,
-      system: WORKER_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: contextParts.join("\n") }],
-    });
+    promptParts.push("\nRespond with the JSON object only.");
 
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
+    const result = await runCli(this.claudeCli, [
+      "--print",
+      "--output-format", "text",
+      promptParts.join("\n"),
+    ], { timeoutMs: 300_000 });
 
-    const parsed = JSON.parse(text) as {
-      status: "completed" | "blocked";
-      files: Array<{ path: string; content: string }>;
-      blockerReason: string | null;
-      notes: string;
-    };
+    if (result.exitCode !== 0) {
+      return {
+        subtaskId: subtask.id,
+        status: "blocked",
+        code: "",
+        files: [],
+        blockerReason: `CLI error: ${result.stderr}`,
+      };
+    }
 
-    return {
-      subtaskId: subtask.id,
-      status: parsed.status,
-      code: parsed.files.map((f) => `// ${f.path}\n${f.content}`).join("\n\n"),
-      files: parsed.files.map((f) => f.path),
-      blockerReason: parsed.blockerReason ?? undefined,
-    };
+    const text = result.stdout.trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return {
+        subtaskId: subtask.id,
+        status: "completed",
+        code: text,
+        files: [],
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        status: "completed" | "blocked";
+        files: Array<{ path: string; content: string }>;
+        blockerReason: string | null;
+        notes: string;
+      };
+
+      return {
+        subtaskId: subtask.id,
+        status: parsed.status,
+        code: parsed.files
+          .map((f) => `// ${f.path}\n${f.content}`)
+          .join("\n\n"),
+        files: parsed.files.map((f) => f.path),
+        blockerReason: parsed.blockerReason ?? undefined,
+      };
+    } catch {
+      // If JSON parsing fails, return raw output as code
+      return {
+        subtaskId: subtask.id,
+        status: "completed",
+        code: text,
+        files: [],
+      };
+    }
   }
 
   async executeParallel(

@@ -30,7 +30,7 @@ export class Pipeline {
     this.cto = new CTOAgent(env);
     this.worker = new WorkerAgent(env);
     this.reviewer = new ReviewerAgent(env);
-    this.researcher = new ResearcherAgent(env);
+    this.researcher = new ResearcherAgent();
     this.maxIterations = env.MAX_REVIEW_ITERATIONS;
     this.onEvent = onEvent;
   }
