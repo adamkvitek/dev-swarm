@@ -1,0 +1,247 @@
+import { mkdir, rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+import { runCli } from "../agents/cli-runner.js";
+
+export interface WorktreeInfo {
+  path: string;       // absolute path to worktree dir
+  branch: string;     // e.g. "worker/abc12345/1"
+  repoPath: string;   // source repo
+  jobId: string;
+  subtaskId: string;
+}
+
+/**
+ * Manages git worktree lifecycle for parallel worker isolation.
+ *
+ * Each worker gets its own worktree so parallel workers can't conflict.
+ * Worktree creation is serialized via an async queue to prevent git
+ * lock file conflicts when creating multiple worktrees simultaneously.
+ */
+export class WorktreeManager {
+  private workspaceDir: string;
+  private worktrees = new Map<string, WorktreeInfo>();
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(workspaceDir: string) {
+    // Resolve ~ at construction time
+    this.workspaceDir = workspaceDir.startsWith("~")
+      ? workspaceDir.replace("~", homedir())
+      : workspaceDir;
+    this.workspaceDir = resolve(this.workspaceDir);
+  }
+
+  async initialize(): Promise<void> {
+    await mkdir(this.workspaceDir, { recursive: true });
+    console.log(`[worktree] Workspace initialized at ${this.workspaceDir}`);
+  }
+
+  /**
+   * Create a worktree for a specific subtask. Serialized to avoid git lock conflicts.
+   */
+  async create(repoPath: string, jobId: string, subtaskId: string): Promise<WorktreeInfo> {
+    // Serialize creation through the queue
+    const result = await this.enqueue(() => this.doCreate(repoPath, jobId, subtaskId));
+    return result;
+  }
+
+  /**
+   * Remove a single worktree by job + subtask ID.
+   */
+  async remove(jobId: string, subtaskId: string): Promise<void> {
+    const key = worktreeKey(jobId, subtaskId);
+    const info = this.worktrees.get(key);
+    if (!info) return;
+
+    await this.doRemove(info);
+    this.worktrees.delete(key);
+  }
+
+  /**
+   * Remove all worktrees for a job.
+   */
+  async removeByJob(jobId: string): Promise<void> {
+    const toRemove: WorktreeInfo[] = [];
+    for (const [key, info] of this.worktrees) {
+      if (info.jobId === jobId) {
+        toRemove.push(info);
+        this.worktrees.delete(key);
+      }
+    }
+    await Promise.all(toRemove.map((info) => this.doRemove(info)));
+  }
+
+  /**
+   * Merge all worker branches for a job into a feature branch.
+   * Returns the feature branch name.
+   */
+  async mergeToFeatureBranch(
+    repoPath: string,
+    jobId: string,
+    taskSummary: string,
+  ): Promise<string> {
+    const shortId = jobId.slice(0, 8);
+    const slug = taskSummary
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 40);
+    const featureBranch = `feature/${slug || shortId}`;
+
+    // Collect worker branches for this job
+    const workerBranches: string[] = [];
+    for (const info of this.worktrees.values()) {
+      if (info.jobId === jobId) {
+        workerBranches.push(info.branch);
+      }
+    }
+
+    if (workerBranches.length === 0) {
+      throw new Error(`No worktree branches found for job ${jobId}`);
+    }
+
+    // Get the current HEAD of the repo to branch from
+    const headResult = await runCli("git", ["-C", repoPath, "rev-parse", "HEAD"], {
+      timeoutMs: 10_000,
+    });
+    if (headResult.exitCode !== 0) {
+      throw new Error(`Failed to get HEAD: ${headResult.stderr}`);
+    }
+    const baseCommit = headResult.stdout.trim();
+
+    // Create the feature branch from the current HEAD
+    const createResult = await runCli(
+      "git",
+      ["-C", repoPath, "checkout", "-b", featureBranch, baseCommit],
+      { timeoutMs: 10_000 },
+    );
+    if (createResult.exitCode !== 0) {
+      throw new Error(`Failed to create branch ${featureBranch}: ${createResult.stderr}`);
+    }
+
+    // Merge each worker branch
+    for (const branch of workerBranches) {
+      const mergeResult = await runCli(
+        "git",
+        ["-C", repoPath, "merge", branch, "--no-edit", "-m", `Merge ${branch}`],
+        { timeoutMs: 30_000 },
+      );
+      if (mergeResult.exitCode !== 0) {
+        // Abort the failed merge and throw
+        await runCli("git", ["-C", repoPath, "merge", "--abort"], { timeoutMs: 10_000 });
+        throw new Error(`Merge conflict merging ${branch}: ${mergeResult.stderr}`);
+      }
+    }
+
+    // Return to the original branch
+    await runCli("git", ["-C", repoPath, "checkout", "-"], { timeoutMs: 10_000 });
+
+    console.log(
+      `[worktree] Merged ${workerBranches.length} branches into ${featureBranch}`,
+    );
+    return featureBranch;
+  }
+
+  /**
+   * Remove all worktrees (shutdown cleanup).
+   */
+  async removeAll(): Promise<void> {
+    const all = Array.from(this.worktrees.values());
+    this.worktrees.clear();
+    await Promise.all(all.map((info) => this.doRemove(info)));
+    console.log(`[worktree] Cleaned up ${all.length} worktrees`);
+  }
+
+  /**
+   * Get all worktree infos for a job.
+   */
+  getByJob(jobId: string): WorktreeInfo[] {
+    const result: WorktreeInfo[] = [];
+    for (const info of this.worktrees.values()) {
+      if (info.jobId === jobId) {
+        result.push(info);
+      }
+    }
+    return result;
+  }
+
+  // --- Internals ---
+
+  private async doCreate(
+    repoPath: string,
+    jobId: string,
+    subtaskId: string,
+  ): Promise<WorktreeInfo> {
+    const shortId = jobId.slice(0, 8);
+    const dirName = `worker-${shortId}-${subtaskId}`;
+    const worktreePath = resolve(this.workspaceDir, dirName);
+    const branch = `worker/${shortId}/${subtaskId}`;
+
+    const result = await runCli(
+      "git",
+      ["-C", repoPath, "worktree", "add", "-b", branch, worktreePath],
+      { timeoutMs: 30_000 },
+    );
+
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Failed to create worktree at ${worktreePath}: ${result.stderr}`,
+      );
+    }
+
+    const info: WorktreeInfo = {
+      path: worktreePath,
+      branch,
+      repoPath,
+      jobId,
+      subtaskId,
+    };
+
+    this.worktrees.set(worktreeKey(jobId, subtaskId), info);
+    console.log(`[worktree] Created ${worktreePath} (branch: ${branch})`);
+    return info;
+  }
+
+  private async doRemove(info: WorktreeInfo): Promise<void> {
+    // Remove the worktree
+    const removeResult = await runCli(
+      "git",
+      ["-C", info.repoPath, "worktree", "remove", info.path, "--force"],
+      { timeoutMs: 15_000 },
+    );
+    if (removeResult.exitCode !== 0) {
+      // Worktree dir might already be gone — try rm as fallback
+      console.warn(`[worktree] git worktree remove failed, cleaning up manually: ${removeResult.stderr}`);
+      await rm(info.path, { recursive: true, force: true });
+    }
+
+    // Delete the branch
+    await runCli(
+      "git",
+      ["-C", info.repoPath, "branch", "-D", info.branch],
+      { timeoutMs: 10_000 },
+    );
+    console.log(`[worktree] Removed ${info.path} (branch: ${info.branch})`);
+  }
+
+  /**
+   * Enqueue an async operation to serialize worktree creation.
+   */
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this.queue;
+    let resolveCurrent: () => void;
+    this.queue = new Promise<void>((r) => { resolveCurrent = r; });
+
+    return prev.then(async () => {
+      try {
+        return await fn();
+      } finally {
+        resolveCurrent!();
+      }
+    });
+  }
+}
+
+function worktreeKey(jobId: string, subtaskId: string): string {
+  return `${jobId}:${subtaskId}`;
+}

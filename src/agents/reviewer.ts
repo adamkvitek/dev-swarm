@@ -1,7 +1,3 @@
-import { writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
 import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 import type { WorkerResult } from "./worker.js";
@@ -23,7 +19,13 @@ export interface ReviewResult {
   iteration: number;
 }
 
-const REVIEWER_SYSTEM_PROMPT = `You are a senior code reviewer. You review code produced by a development team.
+const REVIEWER_SYSTEM_PROMPT = `You are a senior code reviewer with full access to the codebase.
+
+Review the changes in this worktree. You can:
+- Read any file to understand context
+- Write and run test scripts to verify correctness
+- Run linters (check package.json scripts, Makefile, etc.)
+- Check for security issues, code quality, and completeness
 
 Score each criterion from 1-10:
 - **Correctness**: Does the code do what was asked? Are there bugs?
@@ -32,7 +34,7 @@ Score each criterion from 1-10:
 - **Security**: Any vulnerabilities? Input validation? Injection risks?
 - **Completeness**: Is the full task implemented? Any missing pieces?
 
-Respond ONLY with a JSON object (no markdown, no code fences):
+After your review, respond ONLY with a JSON object (no markdown, no code fences):
 {
   "verdict": "APPROVE" | "REVISE",
   "scores": {
@@ -63,40 +65,49 @@ export class ReviewerAgent {
   async review(
     workerResults: WorkerResult[],
     taskDescription: string,
-    iteration: number
+    iteration: number,
+    signal?: AbortSignal,
   ): Promise<ReviewResult> {
+    // Build review context with diffs and file lists per subtask
     const codeForReview = workerResults
       .map(
         (r) =>
-          `## Subtask: ${r.subtaskId}\nStatus: ${r.status}\nFiles: ${r.files.join(", ")}\n\n${r.code}`
+          `## Subtask: ${r.subtaskId}\nStatus: ${r.status}\n` +
+          `Work dir: ${r.workDir}\nFiles changed: ${r.files.join(", ")}\n` +
+          `Summary: ${r.summary}\n\n### Diff\n\`\`\`\n${r.diff.slice(0, 10_000)}\n\`\`\``
       )
       .join("\n\n---\n\n");
 
     const fullPrompt = [
-      REVIEWER_SYSTEM_PROMPT,
-      "",
       `## Task Description\n${taskDescription}`,
       `## Quality Threshold\nAverage score must be >= ${this.qualityThreshold} to APPROVE.`,
       `## Iteration\n${iteration} of max review cycles.`,
-      `## Code to Review\n${codeForReview}`,
+      `## Changes to Review\n${codeForReview}`,
       "",
+      "Review the changes. Read the actual files for full context. Run tests if possible.",
       "Respond with the JSON object only.",
     ].join("\n\n");
 
-    // Write prompt to temp file to avoid shell argument issues
-    const tmpFile = join(tmpdir(), `reviewer-${randomUUID()}.txt`);
-    await writeFile(tmpFile, fullPrompt, "utf-8");
     console.log(`[REVIEWER] Starting review (iteration ${iteration})...`);
 
-    const result = await runCli("bash", [
-      "-c",
-      `cat "${tmpFile}" | ${this.codexCli} exec --full-auto -`,
-    ], { timeoutMs: 1_800_000 }); // 30 min
+    // Use the first worker's workDir as the review cwd — reviewer can read across worktrees
+    const reviewCwd = workerResults[0]?.workDir;
 
-    await unlink(tmpFile).catch(() => {});
+    let result;
+    if (reviewCwd) {
+      // Full agentic mode: Codex runs in the worktree with filesystem access
+      result = await runCli(this.codexCli, [
+        "exec", "--full-auto", "-C", reviewCwd, "--json",
+        "-c", 'sandbox_permissions=["disk-full-read-access"]',
+      ], { timeoutMs: 1_800_000, stdin: fullPrompt, signal }); // 30 min
+    } else {
+      // Fallback: stdin-only review (no worktree available)
+      result = await runCli(this.codexCli, [
+        "exec", "--full-auto", "-",
+      ], { timeoutMs: 1_800_000, stdin: fullPrompt, signal });
+    }
 
     if (result.exitCode !== 0) {
-      // If codex fails, return a REVISE with the error
       return {
         verdict: "REVISE",
         scores: {
