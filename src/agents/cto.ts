@@ -47,7 +47,7 @@ export class CTOAgent {
 
     console.log(`[CTO] Sending to session (active=${this.session.isActive}, ${prompt.length} chars)`);
 
-    const result = await this.session.send(prompt, { timeoutMs: 600_000 });
+    const result = await this.session.send(prompt, { timeoutMs: 1_800_000 });
 
     console.log(`[CTO] Response (${result.durationMs}ms, $${result.costUsd.toFixed(4)}): ${result.text.slice(0, 200)}...`);
 

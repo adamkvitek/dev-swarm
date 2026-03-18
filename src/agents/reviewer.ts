@@ -91,7 +91,7 @@ export class ReviewerAgent {
     const result = await runCli("bash", [
       "-c",
       `cat "${tmpFile}" | ${this.codexCli} exec --full-auto -`,
-    ], { timeoutMs: 600_000 }); // 10 min
+    ], { timeoutMs: 1_800_000 }); // 30 min
 
     await unlink(tmpFile).catch(() => {});
 
