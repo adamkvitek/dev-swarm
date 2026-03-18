@@ -33,3 +33,12 @@
 **Why:** User has a Perplexity account. Dedicated search API is more cost-effective than burning Claude/OpenAI tokens on search tasks. Sonar-pro provides cited sources.
 **Trade-offs:** Additional API dependency. Perplexity API availability/rate limits.
 **Revisit if:** Claude or OpenAI add cost-effective built-in search that matches Perplexity quality.
+
+---
+
+## 2026-03-18 — OpenClaw must NEVER run on host OS, VM only
+**Chosen:** Enforce that OpenClaw may only be executed inside a virtual machine. The runtime guard (`assertNotHostOpenClaw` in `cli-runner.ts`) blocks openclaw invocations unless the environment variable `OPENCLAW_VM_CONFIRMED=1` is set. This variable should only be configured inside a dedicated VM — never on the host.
+**Alternatives:** Run OpenClaw directly on host (rejected — dangerous), containerize with Docker (insufficient isolation for this threat model), blanket-block all openclaw commands regardless of environment (rejected — prevents legitimate VM-side usage)
+**Why:** Baptiste explicitly warned that running OpenClaw on the host is dangerous. OpenClaw's daemon (`openclaw onboard --install-daemon`) installs persistent background processes and has broad filesystem/network access. Running it on a developer's primary machine risks unintended side effects, data exfiltration, or system-level changes that are difficult to reverse.
+**Trade-offs:** Requires VM setup for anyone who wants OpenClaw integration, which adds friction. Docker was considered but a full VM provides stronger isolation boundaries (separate kernel, network stack, filesystem). The env-var approach relies on operators not setting `OPENCLAW_VM_CONFIRMED=1` on the host — this is a trust boundary, not a cryptographic one.
+**Revisit if:** OpenClaw adds a sandboxed execution mode with verifiable isolation guarantees, or if the project permanently drops OpenClaw integration.

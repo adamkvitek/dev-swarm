@@ -86,11 +86,23 @@ The bot will:
 
 ## Step 6 (Optional): OpenClaw Integration
 
-If you want to use this as an OpenClaw skill:
+> **WARNING: OpenClaw must NEVER run on your host OS.**
+>
+> Baptiste explicitly warned that OpenClaw is dangerous to run directly on a host machine. Its daemon installs persistent background processes with broad filesystem and network access. **Only run OpenClaw inside a dedicated virtual machine (VM).** Docker is not sufficient — use a full VM (e.g., UTM, Parallels, VirtualBox) with a separate kernel and network stack.
+>
+> Dev-swarm includes a runtime guard (`assertNotHostOpenClaw`) that will **abort with an error** if any code path attempts to invoke `openclaw` without the `OPENCLAW_VM_CONFIRMED=1` environment variable. This variable must only be set inside a VM — never on the host.
 
-1. Install OpenClaw: `npx openclaw@latest onboard --install-daemon`
-2. Copy the `skill/` directory to `~/.openclaw/workspace/skills/dev-swarm/`
-3. The skill will be available to OpenClaw's agent across all connected channels
+If you want to use this as an OpenClaw skill **inside a VM**:
+
+1. Set up a dedicated VM (Ubuntu recommended)
+2. Inside the VM, set the safety env var: `export OPENCLAW_VM_CONFIRMED=1`
+   - Add this to the VM's `~/.bashrc` or `~/.profile` so it persists across sessions
+   - **NEVER set this variable on your host machine** — the runtime guard uses it to distinguish host from VM
+3. Inside the VM, install OpenClaw: `npx openclaw@latest onboard --install-daemon`
+4. Copy the `skill/` directory to `~/.openclaw/workspace/skills/dev-swarm/`
+5. The skill will be available to OpenClaw's agent across all connected channels
+
+**Do NOT run `npx openclaw` on your host machine.** The runtime guard in `cli-runner.ts` will abort with an error if any code path attempts to invoke openclaw without `OPENCLAW_VM_CONFIRMED=1`.
 
 ## Architecture
 

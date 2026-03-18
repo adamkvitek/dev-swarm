@@ -6,8 +6,8 @@ export interface ResearchResult {
 
 /**
  * Research agent — currently a stub.
- * Will be connected to Perplexity API when credits are available,
- * or routed through OpenClaw's built-in Perplexity integration.
+ * Will be connected to Perplexity API when credits are available.
+ * NOTE: OpenClaw integration was dropped (dangerous on host). See DECISIONS.md.
  */
 export class ResearcherAgent {
   isAvailable(): boolean {

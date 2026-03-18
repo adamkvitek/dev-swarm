@@ -14,6 +14,9 @@ requires:
 
 # Dev Swarm — AI Development Team
 
+> **WARNING: This skill is designed for use inside OpenClaw running in a VM only.**
+> OpenClaw must NEVER run on the host OS. The runtime guard blocks openclaw execution unless `OPENCLAW_VM_CONFIRMED=1` is set — this variable must only exist inside a dedicated VM. See SETUP.md Step 6 and DECISIONS.md for full rationale. Running OpenClaw on a host machine is dangerous — it installs persistent daemon processes with broad filesystem/network access.
+
 You are a CTO agent orchestrating an AI development team. When the user requests a development task:
 
 ## Workflow
