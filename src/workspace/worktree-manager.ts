@@ -2,6 +2,12 @@ import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { runCli } from "../agents/cli-runner.js";
+import {
+  validateChangedFiles,
+  getWorktreeChangedFiles,
+  isSelfRepo,
+  type DiffValidation,
+} from "./control-plane.js";
 
 export interface WorktreeInfo {
   path: string;       // absolute path to worktree dir
@@ -9,6 +15,13 @@ export interface WorktreeInfo {
   repoPath: string;   // source repo
   jobId: string;
   subtaskId: string;
+  isSelfRepo: boolean; // true if targeting the bot's own codebase
+}
+
+export interface MergeResult {
+  featureBranch: string;
+  validation: DiffValidation;
+  merged: boolean; // false if blocked by control plane validation
 }
 
 /**
@@ -73,13 +86,17 @@ export class WorktreeManager {
 
   /**
    * Merge all worker branches for a job into a feature branch.
-   * Returns the feature branch name.
+   *
+   * SAFETY: If the target repo is the bot's own codebase, validates the diff
+   * against control plane protections BEFORE merging. If control plane files
+   * are touched, the feature branch is still created (for human review) but
+   * the merge is flagged as requiring manual approval.
    */
   async mergeToFeatureBranch(
     repoPath: string,
     jobId: string,
     taskSummary: string,
-  ): Promise<string> {
+  ): Promise<MergeResult> {
     const shortId = jobId.slice(0, 8);
     const slug = taskSummary
       .toLowerCase()
@@ -98,6 +115,30 @@ export class WorktreeManager {
 
     if (workerBranches.length === 0) {
       throw new Error(`No worktree branches found for job ${jobId}`);
+    }
+
+    // --- SAFETY GATE: Validate changed files before merging ---
+    const selfRepo = await isSelfRepo(repoPath);
+    let validation: DiffValidation = { safe: true, controlPlaneFiles: [], neverModifyFiles: [] };
+
+    if (selfRepo) {
+      console.log(`[worktree] SELF-REPO DETECTED — validating worker changes against control plane`);
+
+      // Collect all changed files across worker branches
+      const allChangedFiles: string[] = [];
+      for (const branch of workerBranches) {
+        const files = await getWorktreeChangedFiles(repoPath, branch);
+        allChangedFiles.push(...files);
+      }
+      const uniqueFiles = [...new Set(allChangedFiles)];
+
+      validation = validateChangedFiles(uniqueFiles);
+
+      if (!validation.safe) {
+        console.warn(`[worktree] CONTROL PLANE VIOLATION: ${validation.reason}`);
+        // Still create the branch so a human can review, but DON'T merge
+        // The branch exists with the worker commits for inspection
+      }
     }
 
     // Get the current HEAD of the repo to branch from
@@ -136,10 +177,13 @@ export class WorktreeManager {
     // Return to the original branch
     await runCli("git", ["-C", repoPath, "checkout", "-"], { timeoutMs: 10_000 });
 
+    const merged = validation.safe;
     console.log(
-      `[worktree] Merged ${workerBranches.length} branches into ${featureBranch}`,
+      `[worktree] ${merged ? "Merged" : "Created (PENDING HUMAN REVIEW)"} ` +
+      `${workerBranches.length} branches into ${featureBranch}`,
     );
-    return featureBranch;
+
+    return { featureBranch, validation, merged };
   }
 
   /**
@@ -189,12 +233,18 @@ export class WorktreeManager {
       );
     }
 
+    const selfRepo = await isSelfRepo(repoPath);
+    if (selfRepo) {
+      console.warn(`[worktree] SELF-REPO: Worker ${subtaskId} targeting bot's own codebase`);
+    }
+
     const info: WorktreeInfo = {
       path: worktreePath,
       branch,
       repoPath,
       jobId,
       subtaskId,
+      isSelfRepo: selfRepo,
     };
 
     this.worktrees.set(worktreeKey(jobId, subtaskId), info);

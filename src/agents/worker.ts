@@ -3,6 +3,7 @@ import { runCli } from "./cli-runner.js";
 import type { Env } from "../config/env.js";
 import type { Subtask } from "./cto.js";
 import type { WorktreeManager, WorktreeInfo } from "../workspace/worktree-manager.js";
+import { SELF_REPO_WORKER_ADDENDUM } from "../workspace/control-plane.js";
 
 export interface WorkerResult {
   subtaskId: string;
@@ -55,10 +56,19 @@ export class WorkerAgent {
 
     const prompt = promptParts.join("\n");
 
+    // Build system prompt — add self-repo guardrail addendum if targeting own codebase
+    const systemPrompt = context.worktreeInfo.isSelfRepo
+      ? WORKER_SYSTEM_PROMPT + "\n" + SELF_REPO_WORKER_ADDENDUM
+      : WORKER_SYSTEM_PROMPT;
+
+    if (context.worktreeInfo.isSelfRepo) {
+      console.warn(`[WORKER ${subtask.id}] SELF-REPO MODE — control plane restrictions active`);
+    }
+
     const result = await runCli(this.claudeCli, [
       "--print", "--output-format", "text", "--dangerously-skip-permissions",
       "--allowedTools", "Bash,Edit,Read,Write,Glob,Grep",
-      "-p", WORKER_SYSTEM_PROMPT,
+      "-p", systemPrompt,
     ], {
       timeoutMs: 1_800_000, // 30 min per worker
       stdin: prompt,

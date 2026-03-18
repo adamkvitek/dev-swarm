@@ -1,0 +1,20 @@
+# Bot control plane — requires human review for all changes.
+# AI agents can propose changes via PRs, but these paths must be
+# manually reviewed and approved before merging.
+
+# Core infrastructure
+/src/adapter/          @maintainer
+/src/config/           @maintainer
+/src/index.ts          @maintainer
+/src/workspace/        @maintainer
+/src/mcp/              @maintainer
+/src/agents/           @maintainer
+
+# Safety guardrails (modifying these is privilege escalation)
+/.claude/              @maintainer
+/CODEOWNERS            @maintainer
+/.github/              @maintainer
+
+# Dependencies and build config
+/package.json          @maintainer
+/tsconfig.json         @maintainer
