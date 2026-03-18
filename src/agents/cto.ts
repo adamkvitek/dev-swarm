@@ -57,7 +57,7 @@ export class CTOAgent {
       const result = await runCli("bash", [
         "-c",
         `cat "${tmpFile}" | ${this.claudeCli} --print --output-format text --dangerously-skip-permissions`,
-      ], { timeoutMs: 180_000 });
+      ], { timeoutMs: 600_000 }); // 10 min — reading large repos takes time
 
       if (result.exitCode !== 0) {
         throw new Error(`CTO agent failed (exit ${result.exitCode}): ${result.stderr}`);
