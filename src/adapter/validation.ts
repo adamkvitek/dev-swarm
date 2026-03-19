@@ -55,6 +55,11 @@ export function validateSafeText(value: unknown, fieldName: string, maxLength: n
   if (value.length > maxLength) {
     throw new ValidationError(`${fieldName} exceeds maximum length of ${maxLength}`);
   }
+  if (!SAFE_TEXT_RE.test(value)) {
+    throw new ValidationError(
+      `${fieldName} contains invalid characters`,
+    );
+  }
   return value;
 }
 
