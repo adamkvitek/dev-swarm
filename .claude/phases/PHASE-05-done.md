@@ -1,5 +1,5 @@
 # Phase 05 — Hardening, Security, Tests & Portability
-Status: ACTIVE
+Status: DONE
 
 ## Goal
 Make the system safe, tested, portable, and robust — addressing all HIGH findings from the codebase analysis before scaling further.

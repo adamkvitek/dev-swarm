@@ -133,3 +133,12 @@
 **Why:** Self-modification is a recursive risk — if a worker breaks the bot, the system that manages agents is broken. The runaway agent incident (60GB memory, uncontrolled writes) demonstrated this isn't theoretical. Defense must be deterministic (not prompt-based), layered (no single point of failure), and allow the legitimate use case of proposing bot improvements for human review.
 **Trade-offs:** Adds validation overhead on every merge when targeting self. The protected path list requires manual maintenance — new infrastructure paths must be added to CONTROL_PLANE_PATTERNS. Self-repo detection uses file fingerprinting (heuristic, not cryptographic).
 **Revisit if:** The bot moves to a separate repo from target codebases (eliminates recursive risk), or if OS-level sandboxing (macOS seatbelt / Linux bubblewrap) is added for deeper isolation.
+
+---
+
+## 2026-03-19 — Pino for structured logging (over Winston)
+**Chosen:** Pino as the structured JSON logger, replacing all 62 console.log/warn/error calls.
+**Alternatives:** Winston (more configurable, multiple built-in transports), Bunyan (abandoned), custom wrapper around console
+**Why:** Pino is 5-10x faster than Winston, outputs JSON by default (matches our needs), and follows Unix philosophy — it writes JSON to stdout, you pipe it wherever. We don't need Winston's built-in file rotation or HTTP transports; we're a CLI tool, not a web service. Pino has the highest npm downloads (~22M/week vs Winston's ~19M). Dev experience via `pino-pretty` pipe.
+**Trade-offs:** Less built-in flexibility than Winston. Adding file rotation or remote transport requires external tools (pino-file, pino-socket). The Unix pipe approach is different from Winston's "configure transports in code" model.
+**Revisit if:** We need complex transport routing (multiple destinations with different filters), or if deployment requires in-process log rotation.
