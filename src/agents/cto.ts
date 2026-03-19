@@ -1,4 +1,5 @@
 import { ClaudeSession } from "./claude-session.js";
+import { ctoResponseSchema, parseCliJson } from "./schemas.js";
 import type { Env } from "../config/env.js";
 
 export interface Subtask {
@@ -51,19 +52,14 @@ export class CTOAgent {
 
     console.log(`[CTO] Response (${result.durationMs}ms, $${result.costUsd.toFixed(4)}): ${result.text.slice(0, 200)}...`);
 
-    const jsonMatch = result.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error(`CTO agent returned non-JSON: ${result.text.slice(0, 200)}`);
+    const parsed = parseCliJson(result.text, ctoResponseSchema);
+    if ("error" in parsed) {
+      throw new Error(`CTO agent response invalid: ${parsed.error}`);
     }
 
-    const parsed = JSON.parse(jsonMatch[0]) as {
-      clarifications_needed: string[] | null;
-      plan: TaskPlan | null;
-    };
-
     return {
-      clarifications: parsed.clarifications_needed,
-      plan: parsed.plan,
+      clarifications: parsed.data.clarifications_needed,
+      plan: parsed.data.plan,
     };
   }
 

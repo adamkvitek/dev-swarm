@@ -60,6 +60,17 @@ export class HttpApi {
     const method = req.method ?? "GET";
     const path = url.pathname;
 
+    // Health check — no auth required
+    if (method === "GET" && path === "/health") {
+      const snap = this.resourceGuard.check();
+      return sendJson(res, 200, {
+        status: "ok",
+        uptime: Math.round(process.uptime()),
+        memory: { usedPct: snap.memoryUsedPct, healthy: snap.healthy },
+        workers: { active: snap.activeWorkers, max: snap.maxWorkers },
+      });
+    }
+
     // Auth check — reject requests without valid bearer token
     const auth = req.headers.authorization;
     if (auth !== `Bearer ${this.token}`) {
