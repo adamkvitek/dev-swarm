@@ -1,7 +1,7 @@
 {
   "name": "dev-swarm",
   "version": "0.1.0",
-  "description": "AI dev team orchestrator — OpenClaw skill for CTO/worker/reviewer swarm with Claude + Codex review loops",
+  "description": "AI dev team orchestrator — parallel worker agents with cross-model review, isolated worktrees, and enforced coding standards",
   "type": "module",
   "engines": {
     "node": ">=22"
