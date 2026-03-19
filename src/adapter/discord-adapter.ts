@@ -251,7 +251,7 @@ export class DiscordAdapter {
     }
 
     // Build synthetic notification
-    let notification: string;
+    let notification: string = `[SYSTEM] Job ${job.id} ${job.status}.`;
     if (job.type === "workers") {
       const total = job.workerResults?.length ?? 0;
       const completed = job.workerResults?.filter((r) => r.status === "completed").length ?? 0;
@@ -274,8 +274,6 @@ export class DiscordAdapter {
       if (job.featureBranch) {
         notification += ` Changes merged to branch: ${job.featureBranch}`;
       }
-    } else {
-      notification = `[SYSTEM] Job ${job.id} ${job.status}.`;
     }
 
     if (job.status === "failed") {

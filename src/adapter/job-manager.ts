@@ -5,23 +5,32 @@ import type { Subtask } from "../agents/cto.js";
 import type { Env } from "../config/env.js";
 import type { WorktreeManager, MergeResult } from "../workspace/worktree-manager.js";
 
-export type JobType = "workers" | "review";
 export type JobStatus = "running" | "completed" | "failed" | "cancelled";
 
-export interface Job {
+interface JobBase {
   id: string;
   channelId: string;
-  type: JobType;
   status: JobStatus;
   createdAt: number;
   completedAt?: number;
-  subtasks?: Subtask[];
-  workerResults?: WorkerResult[];
-  reviewResult?: ReviewResult;
   repoPath?: string;
   featureBranch?: string;
   error?: string;
 }
+
+export interface WorkerJob extends JobBase {
+  type: "workers";
+  subtasks: Subtask[];
+  workerResults?: WorkerResult[];
+}
+
+export interface ReviewJob extends JobBase {
+  type: "review";
+  reviewResult?: ReviewResult;
+}
+
+/** Discriminated union — narrow with `job.type === "workers"` or `job.type === "review"` */
+export type Job = WorkerJob | ReviewJob;
 
 export type JobCompleteCallback = (job: Job) => void | Promise<void>;
 
@@ -76,7 +85,7 @@ export class JobManager {
     let count = 0;
     for (const job of this.jobs.values()) {
       if (job.type === "workers" && job.status === "running") {
-        count += job.subtasks?.length ?? 0;
+        count += job.subtasks.length;
       }
     }
     return count;
@@ -97,7 +106,7 @@ export class JobManager {
       };
     }
 
-    const job: Job = {
+    const job: WorkerJob = {
       id: randomUUID(),
       channelId,
       type: "workers",
@@ -111,7 +120,7 @@ export class JobManager {
     // Fire and forget — runs in background, calls onJobComplete when done
     void this.runJob(
       job,
-      () => this.workerAgent.executeParallel(job.subtasks!, {
+      () => this.workerAgent.executeParallel(job.subtasks, {
         techStack,
         repoPath: job.repoPath!,
         worktreeManager: this.worktreeManager,
@@ -135,11 +144,11 @@ export class JobManager {
     if (!workerJob) {
       return { error: `Worker job ${workerJobId} not found` };
     }
-    if (workerJob.status !== "completed" || !workerJob.workerResults) {
+    if (workerJob.type !== "workers" || workerJob.status !== "completed" || !workerJob.workerResults) {
       return { error: `Worker job ${workerJobId} is not completed or has no results` };
     }
 
-    const job: Job = {
+    const job: ReviewJob = {
       id: randomUUID(),
       channelId,
       type: "review",

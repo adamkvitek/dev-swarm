@@ -214,8 +214,8 @@ export class HttpApi {
             id: job.id,
             type: job.type,
             status: job.status,
-            workerResults: job.workerResults,
-            reviewResult: job.reviewResult,
+            workerResults: job.type === "workers" ? job.workerResults : undefined,
+            reviewResult: job.type === "review" ? job.reviewResult : undefined,
             error: job.error,
           });
         }
@@ -228,7 +228,7 @@ export class HttpApi {
           status: job.status,
           createdAt: job.createdAt,
           completedAt: job.completedAt,
-          subtaskCount: job.subtasks?.length,
+          subtaskCount: job.type === "workers" ? job.subtasks.length : undefined,
           error: job.error,
         });
       }
