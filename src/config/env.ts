@@ -13,8 +13,10 @@ function detectHardware(): { cores: number; ramGb: number; defaultWorkers: numbe
   const cores = cpus().length;
   const ramGb = Math.round(totalmem() / (1024 * 1024 * 1024));
   const defaultWorkers = Math.max(1, Math.floor(cores / 2));
-  // Memory ceiling: 50% of RAM, clamped to 50-95 range
-  const defaultMemPct = Math.min(95, Math.max(50, 50));
+  // Memory ceiling: 85% of RAM on macOS (counts inactive/cached as "used"),
+  // 80% on Linux (reports memory more accurately).
+  const isMacOS = process.platform === "darwin";
+  const defaultMemPct = isMacOS ? 85 : 80;
   return { cores, ramGb, defaultWorkers, defaultMemPct };
 }
 
