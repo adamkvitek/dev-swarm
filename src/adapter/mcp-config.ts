@@ -23,13 +23,14 @@ export async function generateMcpConfig(
   const serverPath = resolve(__dirname, "..", "mcp", serverExt);
   const projectRoot = resolve(__dirname, "..", "..");
 
-  // In tsx mode, use the local tsx binary to run the .ts server directly.
+  // In tsx mode, run tsx's CLI entry point directly via node — this avoids
+  // platform-specific .bin symlinks (Unix) vs .cmd shims (Windows).
   // In compiled mode, use node with the .js file from dist/.
   let command: string;
   let args: string[];
   if (isTsxMode) {
-    command = resolve(projectRoot, "node_modules", ".bin", "tsx");
-    args = [serverPath];
+    command = process.execPath;
+    args = [resolve(projectRoot, "node_modules", "tsx", "dist", "cli.mjs"), serverPath];
   } else {
     command = "node";
     args = [serverPath];

@@ -14,10 +14,12 @@ const ROOT = resolve(__dirname, "..");
 async function main(): Promise<void> {
   // 1. Start the server in the background (no shell — direct Node spawn)
   console.log("Starting dev-swarm server...");
-  const tsxPath = resolve(ROOT, "node_modules", ".bin", "tsx");
+  // Use tsx's CLI entry point directly — avoids platform-specific
+  // .bin symlinks (Unix) vs .cmd shims (Windows).
+  const tsxCli = resolve(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
   const server = spawn(process.execPath, [
     "--no-warnings",
-    tsxPath,
+    tsxCli,
     resolve(__dirname, "serve.ts"),
   ], {
     cwd: ROOT,
