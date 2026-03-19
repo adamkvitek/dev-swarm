@@ -55,11 +55,8 @@ export function validateSafeText(value: unknown, fieldName: string, maxLength: n
   if (value.length > maxLength) {
     throw new ValidationError(`${fieldName} exceeds maximum length of ${maxLength}`);
   }
-  if (!SAFE_TEXT_RE.test(value)) {
-    throw new ValidationError(
-      `${fieldName} contains invalid characters`,
-    );
-  }
+  // No character restriction on descriptions/feedback — they're prompt text, not shell input.
+  // Length limit is sufficient protection.
   return value;
 }
 
