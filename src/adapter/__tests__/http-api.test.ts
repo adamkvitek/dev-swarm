@@ -28,10 +28,12 @@ function createMockResourceGuard(): ResourceGuard {
       memoryUsedPct: 45,
       memoryUsedMb: 7200,
       memoryTotalMb: 16000,
+      memoryAvailableMb: 8800,
       activeWorkers: 0,
       maxWorkers: 4,
       canSpawnMore: true,
       healthy: true,
+      platform: "darwin",
     }),
     statusLine: () => "Memory: 7200MB / 16000MB (45%) | Workers: 0/4",
   } as unknown as ResourceGuard;

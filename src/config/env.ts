@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cpus, homedir, totalmem } from "node:os";
+import { cpus, homedir, totalmem, platform } from "node:os";
 import { config } from "dotenv";
 import { log } from "../logger.js";
 
@@ -7,17 +7,28 @@ config();
 
 /**
  * Derive sensible defaults from the current machine's hardware.
- * Goal: 50% of CPU cores for workers, 50% of RAM as memory ceiling.
+ * OS-aware: handles macOS, Linux, and Windows memory reporting differences.
  */
-function detectHardware(): { cores: number; ramGb: number; defaultWorkers: number; defaultMemPct: number } {
+function detectHardware(): { cores: number; ramGb: number; defaultWorkers: number; defaultMemPct: number; os: string } {
   const cores = cpus().length;
   const ramGb = Math.round(totalmem() / (1024 * 1024 * 1024));
   const defaultWorkers = Math.max(1, Math.floor(cores / 2));
-  // Memory ceiling: 85% of RAM on macOS (counts inactive/cached as "used"),
-  // 80% on Linux (reports memory more accurately).
-  const isMacOS = process.platform === "darwin";
-  const defaultMemPct = isMacOS ? 85 : 80;
-  return { cores, ramGb, defaultWorkers, defaultMemPct };
+  const os = platform();
+
+  // Memory ceiling defaults per OS:
+  // - macOS (darwin): 85% — os.freemem() excludes inactive/cached pages,
+  //   making memory look much more used than it is
+  // - Linux: 80% — we read MemAvailable from /proc/meminfo for accuracy
+  // - Windows (win32): 80% — os.freemem() reports actual available memory
+  let defaultMemPct: number;
+  switch (os) {
+    case "darwin": defaultMemPct = 85; break;
+    case "linux":  defaultMemPct = 80; break;
+    case "win32":  defaultMemPct = 80; break;
+    default:       defaultMemPct = 80; break;
+  }
+
+  return { cores, ramGb, defaultWorkers, defaultMemPct, os };
 }
 
 const hw = detectHardware();
@@ -69,6 +80,7 @@ export function loadEnv(): Env {
 
   const env = result.data;
   log.config.info({
+    os: hw.os,
     cores: hw.cores,
     ramGb: hw.ramGb,
     workers: env.MAX_CONCURRENT_WORKERS,
