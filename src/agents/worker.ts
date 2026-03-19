@@ -5,6 +5,7 @@ import type { Env } from "../config/env.js";
 import type { Subtask } from "./cto.js";
 import type { WorktreeManager, WorktreeInfo } from "../workspace/worktree-manager.js";
 import { SELF_REPO_WORKER_ADDENDUM } from "../workspace/control-plane.js";
+import { buildWorkerStandards } from "./standards-loader.js";
 
 export interface WorkerResult {
   subtaskId: string;
@@ -57,10 +58,11 @@ export class WorkerAgent {
 
     const prompt = promptParts.join("\n");
 
-    // Build system prompt — add self-repo guardrail addendum if targeting own codebase
-    const systemPrompt = context.worktreeInfo.isSelfRepo
-      ? WORKER_SYSTEM_PROMPT + "\n" + SELF_REPO_WORKER_ADDENDUM
-      : WORKER_SYSTEM_PROMPT;
+    // Build system prompt with code standards + optional self-repo guardrails
+    const standards = await buildWorkerStandards(context.techStack);
+    let systemPrompt = WORKER_SYSTEM_PROMPT;
+    if (standards) systemPrompt += "\n\n" + standards;
+    if (context.worktreeInfo.isSelfRepo) systemPrompt += "\n" + SELF_REPO_WORKER_ADDENDUM;
 
     if (context.worktreeInfo.isSelfRepo) {
       log.worker.warn({ subtaskId: subtask.id }, "SELF-REPO MODE — control plane restrictions active");
