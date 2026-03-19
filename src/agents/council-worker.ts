@@ -309,7 +309,6 @@ export class CouncilWorkerAgent {
       return `### ${label}\nModel: [anonymized]\nFiles changed: ${impl.files.join(", ")}\nSummary: ${impl.summary}\n\nDiff:\n\`\`\`\n${impl.diff.slice(0, 8_000)}\n\`\`\``;
     }).join("\n\n---\n\n");
 
-    const labelList = labels.join("', '");
     const judgePrompt = [
       `Task: ${subtask.title}`,
       subtask.description,
