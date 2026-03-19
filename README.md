@@ -1,10 +1,12 @@
 # Dev Swarm
 
-AI development team orchestrator. A Discord bot powered by Claude that coordinates parallel worker agents to build software — with cross-model code review (Codex), isolated git worktrees, and enforced coding standards.
+AI development team orchestrator. Coordinates parallel AI worker agents to build software — with cross-model code review (Codex), isolated git worktrees, and enforced coding standards.
+
+Runs in two modes: **Discord bot** for team collaboration, or **Terminal** for private/company work.
 
 ## How It Works
 
-1. You @mention the bot on Discord with a task and a repo path
+1. You give the bot a task and a repo path (via Discord or terminal)
 2. Claude (the CTO) breaks the task into subtasks
 3. Parallel worker agents execute in isolated git worktrees — reading real code, writing files, running tests
 4. A reviewer agent (Codex/o3) reviews the output with full filesystem access
@@ -14,26 +16,56 @@ Workers receive language-specific coding standards (TypeScript, Python, Go, Rust
 
 ## Prerequisites
 
-- **Node.js 22+** — `node --version`
-- **Claude CLI** — `claude --version` ([install](https://docs.anthropic.com/en/docs/claude-code))
-- **Codex CLI** — `codex --version` ([install](https://github.com/openai/codex))
-- **Discord Bot** — token from [Discord Developer Portal](https://discord.com/developers/applications)
-- **Git** — for worktree management
+| Requirement | Check | Install |
+|-------------|-------|---------|
+| Node.js 22+ | `node --version` | [nodejs.org](https://nodejs.org) |
+| Claude CLI | `claude --version` | [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) |
+| Codex CLI | `codex --version` | [Codex GitHub](https://github.com/openai/codex) |
+| Git | `git --version` | Already installed on most systems |
 
-## Setup
+Discord bot token is only needed for Discord mode — terminal mode works without it.
 
-### 1. Clone and install
+## Quick Start
 
 ```bash
 git clone https://github.com/yourname/dev-swarm.git
 cd dev-swarm
 npm install
+cp .env.example .env
 ```
 
-### 2. Create a Discord bot
+### Terminal Mode (no Discord, private data stays local)
+
+No setup needed beyond the prerequisites. No tokens, no accounts.
+
+```bash
+npm run cli
+```
+
+You get an interactive session:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Dev Swarm — Terminal Mode
+  Memory: 7200MB / 16000MB (45%) | Workers: 0/4
+  Type your request. Ctrl+C to exit.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You: Review /Users/adam/projects/my-app for code quality. Use TypeScript standards.
+```
+
+Use this mode when:
+- Working with company/private code
+- You don't want data going through Discord
+- You want a quick local session
+- Testing the pipeline
+
+### Discord Mode (team collaboration)
+
+#### 1. Create a Discord bot
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. **New Application** — name it (e.g. "Daskyleion")
+2. **New Application** → name it (e.g. "Daskyleion")
 3. **Bot** tab:
    - Click **Reset Token** → copy the token
    - Enable **Message Content Intent** (required to read messages)
@@ -42,34 +74,15 @@ npm install
    - Permissions: `Send Messages`, `Read Message History`
    - Copy the generated URL → open it → add the bot to your server
 
-### 3. Configure environment
+#### 2. Configure
 
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set:
+Edit `.env` and add your bot token:
 
 ```
 DISCORD_BOT_TOKEN=your-bot-token-here
 ```
 
-That's the only required value. Everything else has sensible defaults derived from your hardware (CPU cores, RAM).
-
-Optional overrides:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAX_CONCURRENT_WORKERS` | 50% of CPU cores | Max parallel worker agents |
-| `MEMORY_CEILING_PCT` | 50 | Refuse new work above this % of RAM |
-| `WORKSPACE_DIR` | `~/dev/swarm-workspace` | Where git worktrees are created |
-| `REVIEW_QUALITY_THRESHOLD` | 8 | Score needed to APPROVE (1-10) |
-| `MAX_REVIEW_ITERATIONS` | 3 | Max review-revise cycles |
-| `LOG_LEVEL` | info | Pino log level (debug, info, warn, error) |
-| `CLAUDE_CLI` | claude | Path to Claude CLI binary |
-| `CODEX_CLI` | codex | Path to Codex CLI binary |
-
-### 4. Run
+#### 3. Run
 
 ```bash
 # Development (human-readable logs)
@@ -79,22 +92,9 @@ npm run dev
 npm run build && npm start
 ```
 
-## Usage
+#### 4. Use
 
 @mention the bot in Discord:
-
-```
-@bot Add JWT authentication to /Users/adam/projects/my-app
-```
-
-The bot will:
-1. Ask clarifying questions if needed
-2. Present a plan and wait for your approval
-3. Spawn workers in isolated git worktrees
-4. Review the output with Codex
-5. Report results — including the feature branch name on approval
-
-### Example commands
 
 ```
 @bot Review the code quality of /Users/adam/projects/my-api. Focus on error handling.
@@ -102,31 +102,45 @@ The bot will:
 @bot Fix the authentication bug in /Users/adam/projects/my-app. The login endpoint returns 500.
 ```
 
-### System commands
+## Configuration
 
-- **Cancel a running job** — the bot tells you the job ID; ask it to cancel
-- **Check status** — ask the bot what's running
+All settings have sensible defaults derived from your hardware. Override in `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCORD_BOT_TOKEN` | _(none)_ | Required for Discord mode only |
+| `MAX_CONCURRENT_WORKERS` | 50% of CPU cores | Max parallel worker agents |
+| `MEMORY_CEILING_PCT` | 85% (macOS) / 80% (Linux) | Refuse new work above this % of RAM |
+| `WORKSPACE_DIR` | `~/dev/swarm-workspace` | Where git worktrees are created |
+| `REVIEW_QUALITY_THRESHOLD` | 8 | Score needed to APPROVE (1-10) |
+| `MAX_REVIEW_ITERATIONS` | 3 | Max review-revise cycles |
+| `LOG_LEVEL` | info | Pino log level (debug, info, warn, error) |
+| `CLAUDE_CLI` | claude | Path to Claude CLI binary |
+| `CODEX_CLI` | codex | Path to Codex CLI binary |
 
 ## Architecture
 
 ```
-Discord ←→ Adapter ←→ Claude CLI (with --resume sessions)
-                          ↓
-                    MCP Tools (spawn_workers, spawn_review, etc.)
-                          ↓
-                    Internal HTTP API
-                          ↓
-                    Job Manager
-                     ↙        ↘
-              Workers          Reviewer
-           (Claude CLI)      (Codex CLI)
-           in worktrees      in worktree
+Terminal / Discord
+        ↓
+   Claude CLI (persistent sessions via --resume)
+        ↓
+   MCP Tools (spawn_workers, spawn_review, etc.)
+        ↓
+   Internal HTTP API
+        ↓
+   Job Manager
+    ↙        ↘
+Workers       Reviewer
+(Claude CLI)  (Codex CLI)
+in worktrees  in worktree
 ```
 
-- **Adapter** — thin transport between Discord and Claude CLI. No business logic.
+- **Adapter** — thin transport (Discord or terminal). No business logic.
 - **MCP Server** — gives Claude tools to spawn workers, reviews, check resources.
 - **Job Manager** — owns worker/reviewer lifecycle, cleanup, eviction.
 - **Worktree Manager** — isolated git worktrees per worker, serialized creation, retry cleanup.
+- **Standards Loader** — detects language from tech stack, injects coding standards + project conventions.
 - **Control Plane** — self-modification guardrails when agents target this repo.
 
 ## Safety
@@ -161,12 +175,19 @@ Workers automatically receive coding standards based on the `tech_stack` paramet
 
 | Script | Description |
 |--------|-------------|
-| `npm run dev` | Run in dev mode with pino-pretty logs |
-| `npm start` | Run production build |
+| `npm run cli` | **Terminal mode** — interactive REPL, no Discord |
+| `npm run dev` | Discord mode with human-readable pino-pretty logs |
+| `npm start` | Discord mode, production (JSON logs) |
 | `npm run build` | Compile TypeScript |
 | `npm run typecheck` | Type check without emitting |
 | `npm test` | Run tests (vitest) |
 | `npm run lint` | Lint with oxlint |
+
+## Stopping the Bot
+
+- **Ctrl+C** — graceful shutdown (finishes in-flight work, cleans worktrees)
+- **Ctrl+C twice** — immediate kill
+- From another terminal: `pkill -f "node dist/index.js"` and `rm -rf ~/dev/swarm-workspace/worker-*`
 
 ## Tests
 
