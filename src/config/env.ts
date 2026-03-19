@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { cpus, homedir, totalmem } from "node:os";
 import { config } from "dotenv";
+import { log } from "../logger.js";
 
 config();
 
@@ -65,10 +66,12 @@ export function loadEnv(): Env {
   }
 
   const env = result.data;
-  console.log(
-    `[config] Hardware: ${hw.cores} cores, ${hw.ramGb}GB RAM → ` +
-    `workers=${env.MAX_CONCURRENT_WORKERS}, memory_ceiling=${env.MEMORY_CEILING_PCT}%`,
-  );
+  log.config.info({
+    cores: hw.cores,
+    ramGb: hw.ramGb,
+    workers: env.MAX_CONCURRENT_WORKERS,
+    memoryCeilingPct: env.MEMORY_CEILING_PCT,
+  }, "Hardware detected, config loaded");
 
   return env;
 }

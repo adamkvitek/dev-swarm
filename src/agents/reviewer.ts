@@ -1,5 +1,6 @@
 import { runCli } from "./cli-runner.js";
 import { reviewerResponseSchema, parseCliJson } from "./schemas.js";
+import { log } from "../logger.js";
 import type { Env } from "../config/env.js";
 import type { WorkerResult } from "./worker.js";
 
@@ -89,7 +90,7 @@ export class ReviewerAgent {
       "Respond with the JSON object only.",
     ].join("\n\n");
 
-    console.log(`[REVIEWER] Starting review (iteration ${iteration})...`);
+    log.reviewer.info({ iteration }, "Starting review");
 
     // Use the first worker's workDir as the review cwd — reviewer can read across worktrees
     const reviewCwd = workerResults[0]?.workDir;

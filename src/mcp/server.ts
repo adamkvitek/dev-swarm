@@ -6,7 +6,9 @@ import { TOOL_DEFINITIONS } from "./tools.js";
 const API_URL = process.env.DEV_SWARM_API_URL;
 const API_TOKEN = process.env.DEV_SWARM_API_TOKEN;
 if (!API_URL || !API_TOKEN) {
-  console.error("DEV_SWARM_API_URL and DEV_SWARM_API_TOKEN environment variables are required");
+  // MCP server runs as a child process — use stderr for fatal config errors
+  // (pino logger may not be available since this is a standalone entry point)
+  process.stderr.write("DEV_SWARM_API_URL and DEV_SWARM_API_TOKEN environment variables are required\n");
   process.exit(1);
 }
 

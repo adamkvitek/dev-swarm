@@ -1,5 +1,6 @@
 import { ClaudeSession } from "./claude-session.js";
 import { ctoResponseSchema, parseCliJson } from "./schemas.js";
+import { log } from "../logger.js";
 import type { Env } from "../config/env.js";
 
 export interface Subtask {
@@ -46,11 +47,11 @@ export class CTOAgent {
       ? userRequest
       : `${CTO_SYSTEM_PROMPT}\n\nRequest: ${userRequest}\n\nJSON response:`;
 
-    console.log(`[CTO] Sending to session (active=${this.session.isActive}, ${prompt.length} chars)`);
+    log.cto.info({ active: this.session.isActive, promptChars: prompt.length }, "Sending to session");
 
     const result = await this.session.send(prompt, { timeoutMs: 1_800_000 });
 
-    console.log(`[CTO] Response (${result.durationMs}ms, $${result.costUsd.toFixed(4)}): ${result.text.slice(0, 200)}...`);
+    log.cto.info({ durationMs: result.durationMs, costUsd: result.costUsd, preview: result.text.slice(0, 200) }, "Response received");
 
     const parsed = parseCliJson(result.text, ctoResponseSchema);
     if ("error" in parsed) {

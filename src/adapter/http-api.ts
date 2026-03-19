@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { log } from "../logger.js";
 import type { JobManager, JobStatus } from "./job-manager.js";
 import type { ResourceGuard } from "./resource-guard.js";
 import {
@@ -44,7 +45,7 @@ export class HttpApi {
       this.server.once("error", reject);
       this.server.listen(port, host, () => {
         this.server.removeListener("error", reject);
-        console.log(`[http-api] Listening on ${host}:${port}`);
+        log.httpApi.info({ host, port }, "Listening");
         resolve();
       });
     });
@@ -53,7 +54,7 @@ export class HttpApi {
   async stop(): Promise<void> {
     return new Promise((resolve) => {
       this.server.close(() => {
-        console.log("[http-api] Stopped");
+        log.httpApi.info("Stopped");
         resolve();
       });
     });
@@ -244,7 +245,7 @@ export class HttpApi {
       if (err instanceof ValidationError) {
         return sendJson(res, 400, { error: err.message });
       }
-      console.error(`[http-api] Error handling ${method} ${path}:`, err);
+      log.httpApi.error({ err, method, path }, "Error handling request");
       sendJson(res, 500, { error: "Internal server error" });
     }
   }

@@ -7,9 +7,10 @@ import { generateMcpConfig } from "./adapter/mcp-config.js";
 import { WorkerAgent } from "./agents/worker.js";
 import { ReviewerAgent } from "./agents/reviewer.js";
 import { WorktreeManager } from "./workspace/worktree-manager.js";
+import { logger, log } from "./logger.js";
 
 async function main(): Promise<void> {
-  console.log("Loading configuration...");
+  logger.info("Loading configuration...");
   const env = loadEnv();
 
   // 1. Worktree manager — isolated git worktrees for parallel workers
@@ -47,27 +48,27 @@ async function main(): Promise<void> {
     if (shuttingDown) return; // Prevent double-shutdown from rapid Ctrl+C
     shuttingDown = true;
 
-    console.log(`\n${signal} received — graceful shutdown starting...`);
+    log.shutdown.info({ signal }, "Graceful shutdown starting...");
 
     // 1. Stop accepting new messages
     await adapter.stop();
-    console.log("[shutdown] Discord adapter stopped");
+    log.shutdown.info("Discord adapter stopped");
 
     // 2. Cancel running jobs (sends SIGTERM to workers)
     jobManager.cancelAllJobs();
-    console.log("[shutdown] Running jobs cancelled");
+    log.shutdown.info("Running jobs cancelled");
 
     // 3. Stop HTTP API (no more MCP tool calls)
     await httpApi.stop();
-    console.log("[shutdown] HTTP API stopped");
+    log.shutdown.info("HTTP API stopped");
 
     // 4. Clean up worktrees (with retry — may take a moment)
     await worktreeManager.removeAll();
-    console.log("[shutdown] Worktrees cleaned up");
+    log.shutdown.info("Worktrees cleaned up");
 
     // 5. Final cleanup
     jobManager.destroy();
-    console.log("[shutdown] Shutdown complete");
+    log.shutdown.info("Shutdown complete");
     process.exit(0);
   };
 
@@ -75,10 +76,10 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
   await adapter.start();
-  console.log("Dev Swarm is running. Claude is the bot with MCP tools — waiting for @mentions...");
+  logger.info("Dev Swarm is running. Claude is the bot with MCP tools — waiting for @mentions...");
 }
 
 main().catch((err) => {
-  console.error("Fatal error:", err);
+  logger.fatal({ err }, "Fatal error");
   process.exit(1);
 });

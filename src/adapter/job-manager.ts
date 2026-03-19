@@ -4,6 +4,7 @@ import type { ReviewerAgent, ReviewResult } from "../agents/reviewer.js";
 import type { Subtask } from "../agents/cto.js";
 import type { Env } from "../config/env.js";
 import type { WorktreeManager, MergeResult } from "../workspace/worktree-manager.js";
+import { log } from "../logger.js";
 
 export type JobStatus = "running" | "completed" | "failed" | "cancelled";
 
@@ -71,7 +72,7 @@ export class JobManager {
       try {
         this.evictOldJobs();
       } catch (err) {
-        console.error("[job-manager] Eviction timer error:", err);
+        log.jobMgr.error({ err }, "Eviction timer error");
       }
     }, 5 * 60 * 1000);
     this.evictionTimer.unref();
@@ -212,7 +213,7 @@ export class JobManager {
     job.completedAt = Date.now();
 
     void this.worktreeManager.removeByJob(jobId).catch((err) => {
-      console.error(`[job-manager] Worktree cleanup failed for cancelled job ${jobId}:`, err);
+      log.jobMgr.error({ err, jobId }, "Worktree cleanup failed for cancelled job");
     });
 
     return true;
@@ -249,7 +250,7 @@ export class JobManager {
     this.cancelAllJobs();
     clearInterval(this.evictionTimer);
     void this.worktreeManager.removeAll().catch((err) => {
-      console.error("[job-manager] Worktree cleanup on destroy failed:", err);
+      log.jobMgr.error({ err }, "Worktree cleanup on destroy failed");
     });
   }
 
@@ -295,7 +296,7 @@ export class JobManager {
       job.status = "completed";
       job.completedAt = Date.now();
 
-      console.log(`[job-manager] ${successLog}`);
+      log.jobMgr.info({ jobId: job.id }, successLog);
     } catch (err) {
       if (signal?.aborted) return;
 
@@ -303,12 +304,12 @@ export class JobManager {
       job.error = err instanceof Error ? err.message : String(err);
       job.completedAt = Date.now();
 
-      console.error(`[job-manager] Job ${job.id} failed:`, job.error);
+      log.jobMgr.error({ jobId: job.id, error: job.error }, "Job failed");
     } finally {
       this.abortControllers.delete(job.id);
       if (this.onJobComplete && !signal?.aborted) {
         await Promise.resolve(this.onJobComplete(job)).catch((err) => {
-          console.error(`[job-manager] onJobComplete callback error:`, err);
+          log.jobMgr.error({ err }, "onJobComplete callback error");
         });
       }
     }
@@ -323,10 +324,10 @@ export class JobManager {
         now - job.completedAt > JOB_EVICTION_MS
       ) {
         void this.worktreeManager.removeByJob(id).catch((err) => {
-          console.error(`[job-manager] Worktree cleanup on eviction failed for ${id}:`, err);
+          log.jobMgr.error({ err, jobId: id }, "Worktree cleanup on eviction failed");
         });
         this.jobs.delete(id);
-        console.log(`[job-manager] Evicted old job ${id} (${job.type}, ${job.status})`);
+        log.jobMgr.info({ jobId: id, type: job.type, status: job.status }, "Evicted old job");
       }
     }
   }
@@ -346,7 +347,7 @@ export class JobManager {
     }
 
     if (toEvict.length > 0) {
-      console.log(`[job-manager] Hard cap: evicted ${toEvict.length} oldest jobs`);
+      log.jobMgr.info({ count: toEvict.length }, "Hard cap: evicted oldest jobs");
     }
   }
 

@@ -11,6 +11,7 @@ import { ClaudeSession } from "../agents/claude-session.js";
 import { ChannelMutex } from "./channel-mutex.js";
 import { ResourceGuard } from "./resource-guard.js";
 import { detectedHardware } from "../config/env.js";
+import { log } from "../logger.js";
 import type { JobManager, Job } from "./job-manager.js";
 import type { Env } from "../config/env.js";
 
@@ -50,9 +51,9 @@ export class DiscordAdapter {
     });
 
     this.client.on("ready", () => {
-      console.log(`[adapter] Bot logged in as ${this.client.user?.tag}`);
+      log.adapter.info({ tag: this.client.user?.tag }, "Bot logged in");
       for (const guild of this.client.guilds.cache.values()) {
-        console.log(`[adapter] Connected to ${guild.name} (${guild.id})`);
+        log.adapter.info({ guild: guild.name, guildId: guild.id }, "Connected to guild");
       }
     });
 
@@ -65,9 +66,9 @@ export class DiscordAdapter {
     // Load system prompt
     try {
       this.systemPrompt = await readFile(this.env.SYSTEM_PROMPT_PATH, "utf-8");
-      console.log(`[adapter] System prompt loaded (${this.systemPrompt.length} chars)`);
+      log.adapter.info({ chars: this.systemPrompt.length }, "System prompt loaded");
     } catch (err) {
-      console.warn(`[adapter] No system prompt at ${this.env.SYSTEM_PROMPT_PATH}, using default`);
+      log.adapter.warn({ path: this.env.SYSTEM_PROMPT_PATH }, "No system prompt found, using default");
       this.systemPrompt = null;
     }
 
@@ -75,7 +76,7 @@ export class DiscordAdapter {
   }
 
   async stop(): Promise<void> {
-    console.log("[adapter] Shutting down...");
+    log.adapter.info("Shutting down...");
     this.client.destroy();
   }
 
@@ -107,8 +108,9 @@ export class DiscordAdapter {
     // This prevents the startup flood that caused the runaway agent incident
     const messageAge = Date.now() - message.createdTimestamp;
     if (messageAge > this.env.MAX_MESSAGE_AGE_MS) {
-      console.log(
-        `[adapter] Ignoring old message (${Math.round(messageAge / 1000)}s old) from ${message.author.tag}`
+      log.adapter.info(
+        { ageSeconds: Math.round(messageAge / 1000), author: message.author.tag },
+        "Ignoring old message",
       );
       return;
     }
@@ -123,14 +125,15 @@ export class DiscordAdapter {
 
     const channel = message.channel as TextChannel;
 
-    console.log(
-      `[adapter] ${message.author.tag} in #${channel.name}: "${content.slice(0, 100)}"`
+    log.adapter.info(
+      { author: message.author.tag, channel: channel.name, preview: content.slice(0, 100) },
+      "Incoming message",
     );
 
     // Resource check — refuse if system is overloaded
     const resourceSnap = this.resources.check();
     if (!resourceSnap.healthy) {
-      console.warn(`[adapter] Resource limit hit: ${this.resources.statusLine()}`);
+      log.adapter.warn({ status: this.resources.statusLine() }, "Resource limit hit");
       await channel.send(
         `I'm currently at ${resourceSnap.memoryUsedPct}% memory usage (limit: ${this.env.MEMORY_CEILING_PCT}%). ` +
         `I need to wait for running tasks to finish before taking on new work.`
@@ -173,15 +176,16 @@ export class DiscordAdapter {
         }),
       );
 
-      console.log(
-        `[adapter] Response (${result.durationMs}ms, $${result.costUsd.toFixed(4)}): ${result.text.slice(0, 100)}...`
+      log.adapter.info(
+        { durationMs: result.durationMs, costUsd: result.costUsd, preview: result.text.slice(0, 100) },
+        "Response received",
       );
 
       // Send response, respecting Discord's 2000 char limit
       await this.sendChunked(channel, result.text);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[adapter] Error processing message:`, errMsg);
+      log.adapter.error({ err: errMsg }, "Error processing message");
 
       if (errMsg.includes("timed out")) {
         await this.sendWithRateLimit(channel,
@@ -271,7 +275,7 @@ export class DiscordAdapter {
         if (!isRateLimit || attempt === 2) throw err;
 
         const delay = (attempt + 1) * 2000; // 2s, 4s
-        console.warn(`[adapter] Discord rate limited, retrying in ${delay}ms`);
+        log.adapter.warn({ delayMs: delay, attempt: attempt + 1 }, "Discord rate limited, retrying");
         await new Promise((r) => setTimeout(r, delay));
       }
     }
@@ -285,15 +289,15 @@ export class DiscordAdapter {
     const session = this.sessions.get(channelId);
     if (!session?.isActive) return null;
 
-    console.log(`[adapter] Attempting session recovery for channel ${channelId}...`);
+    log.adapter.info({ channelId }, "Attempting session recovery");
     try {
       const result = await session.send(prompt, {
         timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,
       });
-      console.log(`[adapter] Session recovered (${result.durationMs}ms)`);
+      log.adapter.info({ channelId, durationMs: result.durationMs }, "Session recovered");
       return result.text;
     } catch {
-      console.warn(`[adapter] Session recovery failed, resetting`);
+      log.adapter.warn({ channelId }, "Session recovery failed, resetting");
       return null;
     }
   }
@@ -307,7 +311,7 @@ export class DiscordAdapter {
     const channelId = job.channelId;
     const channel = this.client.channels.cache.get(channelId) as TextChannel | undefined;
     if (!channel) {
-      console.warn(`[adapter] Job ${job.id} completed but channel ${channelId} not found`);
+      log.adapter.warn({ jobId: job.id, channelId }, "Job completed but channel not found");
       return;
     }
 
@@ -341,7 +345,7 @@ export class DiscordAdapter {
       notification += ` Error: ${job.error ?? "unknown"}`;
     }
 
-    console.log(`[adapter] Sending job notification to #${channel.name}: ${notification.slice(0, 120)}...`);
+    log.adapter.info({ jobId: job.id, channel: channel.name, preview: notification.slice(0, 120) }, "Sending job notification");
 
     const release = await this.mutex.acquire(channelId);
     try {
@@ -353,14 +357,15 @@ export class DiscordAdapter {
         }),
       );
 
-      console.log(
-        `[adapter] Job notification response (${result.durationMs}ms): ${result.text.slice(0, 100)}...`
+      log.adapter.info(
+        { jobId: job.id, durationMs: result.durationMs, preview: result.text.slice(0, 100) },
+        "Job notification response",
       );
 
       await this.sendChunked(channel, result.text);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[adapter] Error sending job notification:`, errMsg);
+      log.adapter.error({ err: errMsg, jobId: job.id }, "Error sending job notification");
       await channel.send(
         `A job finished but I had trouble processing the results. Job ID: ${job.id}`
       ).catch(() => {});
