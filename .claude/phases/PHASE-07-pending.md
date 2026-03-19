@@ -41,6 +41,14 @@ Enable multi-model worker implementations for critical tasks, leverage Gemini's 
 - [ ] Update README with council mode and multimodal docs
 - [ ] Update system prompt with council invocation guidance
 
+### README.md Update
+- [ ] Rewrite README with full architecture diagrams (council flow, multimodal routing)
+- [ ] Document terminal mode prominently (no Discord, private data)
+- [ ] Document council mode invocation (Discord + terminal examples)
+- [ ] Document multimodal capabilities (which file types, how to trigger)
+- [ ] Add model strengths comparison table
+- [ ] Add example sessions (terminal transcript showing council in action)
+
 ### Verification
 - [ ] Typecheck clean
 - [ ] Existing 155 tests pass
