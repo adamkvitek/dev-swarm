@@ -1,4 +1,5 @@
 import { runCli } from "./cli-runner.js";
+import { reviewerResponseSchema, parseCliJson } from "./schemas.js";
 import type { Env } from "../config/env.js";
 import type { WorkerResult } from "./worker.js";
 
@@ -144,31 +145,8 @@ export class ReviewerAgent {
       };
     }
 
-    try {
-      const parsed = JSON.parse(jsonMatch[0]) as {
-        verdict: "APPROVE" | "REVISE";
-        scores: Omit<ReviewScore, "average">;
-        feedback: string;
-        issuesBySubtask: Record<string, string[]>;
-      };
-
-      const scores = parsed.scores;
-      const average =
-        (scores.correctness +
-          scores.codeQuality +
-          scores.testCoverage +
-          scores.security +
-          scores.completeness) /
-        5;
-
-      return {
-        verdict: average >= this.qualityThreshold ? "APPROVE" : "REVISE",
-        scores: { ...scores, average },
-        feedback: parsed.feedback,
-        issuesBySubtask: parsed.issuesBySubtask,
-        iteration,
-      };
-    } catch {
+    const parsed = parseCliJson(text, reviewerResponseSchema);
+    if ("error" in parsed) {
       return {
         verdict: "REVISE",
         scores: {
@@ -179,10 +157,27 @@ export class ReviewerAgent {
           completeness: 5,
           average: 5,
         },
-        feedback: `Failed to parse reviewer output: ${text.slice(0, 500)}`,
+        feedback: `Failed to parse reviewer output: ${parsed.error}`,
         issuesBySubtask: {},
         iteration,
       };
     }
+
+    const scores = parsed.data.scores;
+    const average =
+      (scores.correctness +
+        scores.codeQuality +
+        scores.testCoverage +
+        scores.security +
+        scores.completeness) /
+      5;
+
+    return {
+      verdict: average >= this.qualityThreshold ? "APPROVE" : "REVISE",
+      scores: { ...scores, average },
+      feedback: parsed.data.feedback,
+      issuesBySubtask: parsed.data.issuesBySubtask,
+      iteration,
+    };
   }
 }

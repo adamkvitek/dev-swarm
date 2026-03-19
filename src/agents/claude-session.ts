@@ -1,4 +1,5 @@
 import { runCli } from "./cli-runner.js";
+import { claudeSessionResponseSchema, parseCliJson } from "./schemas.js";
 
 export interface SessionResult {
   text: string;
@@ -71,27 +72,20 @@ export class ClaudeSession {
       throw new Error(`Claude session failed (exit ${result.exitCode}): ${result.stderr.slice(0, 300)}`);
     }
 
-    // Parse JSON response
-    const jsonMatch = result.stdout.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error(`No JSON in Claude response: ${result.stdout.slice(0, 200)}`);
+    // Parse and validate JSON response
+    const parsed = parseCliJson(result.stdout, claudeSessionResponseSchema);
+    if ("error" in parsed) {
+      throw new Error(`Claude response parsing failed: ${parsed.error}`);
     }
 
-    const parsed = JSON.parse(jsonMatch[0]) as {
-      result: string;
-      session_id: string;
-      total_cost_usd: number;
-      duration_ms: number;
-    };
-
     // Save session ID for resume
-    this.sessionId = parsed.session_id;
+    this.sessionId = parsed.data.session_id;
 
     return {
-      text: parsed.result,
-      sessionId: parsed.session_id,
-      costUsd: parsed.total_cost_usd,
-      durationMs: parsed.duration_ms,
+      text: parsed.data.result,
+      sessionId: parsed.data.session_id,
+      costUsd: parsed.data.total_cost_usd,
+      durationMs: parsed.data.duration_ms,
     };
   }
 }
