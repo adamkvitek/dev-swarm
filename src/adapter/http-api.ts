@@ -30,10 +30,10 @@ export class HttpApi {
   private rateLimits = new Map<string, number[]>();
   readonly token: string;
 
-  constructor(jobManager: JobManager, resourceGuard: ResourceGuard) {
+  constructor(jobManager: JobManager, resourceGuard: ResourceGuard, existingToken?: string) {
     this.jobManager = jobManager;
     this.resourceGuard = resourceGuard;
-    this.token = randomBytes(32).toString("hex");
+    this.token = existingToken ?? randomBytes(32).toString("hex");
 
     this.server = createServer((req, res) => {
       void this.handleRequest(req, res);

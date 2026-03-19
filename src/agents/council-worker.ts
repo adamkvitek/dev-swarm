@@ -9,6 +9,22 @@ import type { WorktreeManager, WorktreeInfo } from "../workspace/worktree-manage
 import type { WorkerResult } from "./worker.js";
 
 /**
+ * Retry configuration for council workers.
+ *
+ * When a model fails (timeout, crash, blocked result), we retry once
+ * after a backoff delay. This handles transient API failures, rate limits,
+ * and stuck processes without manual intervention.
+ *
+ * Exponential backoff: delay = BASE_DELAY_MS * 2^attempt
+ *   Attempt 0: 15s (first retry after initial failure)
+ *   Attempt 1: 30s (second retry — final attempt)
+ */
+const RETRY_CONFIG = {
+  maxRetries: 1,
+  baseDelayMs: 15_000,
+} as const;
+
+/**
  * Result from a single council worker (one model's implementation).
  */
 export interface CouncilWorkerResult extends WorkerResult {
@@ -127,17 +143,34 @@ export class CouncilWorkerAgent {
     ]);
 
     const implementations: CouncilWorkerResult[] = [];
-    const modelResults = [
-      { result: claudeResult, model: "claude" },
-      { result: codexResult, model: "codex" },
-      { result: geminiResult, model: "gemini" },
+    const modelEntries: Array<{
+      result: PromiseSettledResult<WorkerResult>;
+      model: string;
+      runner: () => Promise<WorkerResult>;
+    }> = [
+      { result: claudeResult, model: "claude", runner: () => this.runClaude(subtask, claudeWorktree, prompt, systemPrompt, context.signal) },
+      { result: codexResult, model: "codex", runner: () => this.runCodex(subtask, codexWorktree, prompt, systemPrompt, context.signal) },
+      { result: geminiResult, model: "gemini", runner: () => this.runGemini(subtask, geminiWorktree, prompt, systemPrompt, context.signal) },
     ];
 
-    for (const { result, model } of modelResults) {
-      if (result.status === "fulfilled") {
+    for (const { result, model, runner } of modelEntries) {
+      if (result.status === "fulfilled" && result.value.status === "completed") {
         implementations.push({ ...result.value, model });
       } else {
-        log.worker.warn({ subtaskId: subtask.id, model, error: String(result.reason) }, "Council worker failed");
+        // Model failed or returned blocked — attempt retry with exponential backoff
+        const failReason = result.status === "rejected"
+          ? String(result.reason)
+          : (result.value as WorkerResult).blockerReason ?? "blocked";
+
+        log.worker.warn(
+          { subtaskId: subtask.id, model, error: failReason },
+          "Council worker failed — scheduling retry",
+        );
+
+        const retried = await this.retryWorker(model, runner, subtask.id, context.signal);
+        if (retried) {
+          implementations.push({ ...retried, model });
+        }
       }
     }
 
@@ -174,6 +207,58 @@ export class CouncilWorkerAgent {
     // Both succeeded — pick the best one
     const best = await this.pickBest(subtask, implementations, context.signal);
     return best;
+  }
+
+  /**
+   * Retry a failed council worker with exponential backoff.
+   *
+   * Returns the successful result, or null if all retries fail.
+   * Respects the abort signal — skips retry if the job was cancelled.
+   */
+  private async retryWorker(
+    model: string,
+    runner: () => Promise<WorkerResult>,
+    subtaskId: string,
+    signal?: AbortSignal,
+  ): Promise<WorkerResult | null> {
+    for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+      if (signal?.aborted) return null;
+
+      const delayMs = RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt);
+      log.worker.info(
+        { subtaskId, model, attempt: attempt + 1, delayMs },
+        `Council retry: waiting ${delayMs}ms before attempt ${attempt + 1}`,
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (signal?.aborted) return null;
+
+      try {
+        const result = await runner();
+        if (result.status === "completed") {
+          log.worker.info(
+            { subtaskId, model, attempt: attempt + 1 },
+            "Council retry succeeded",
+          );
+          return result;
+        }
+        log.worker.warn(
+          { subtaskId, model, attempt: attempt + 1, status: result.status },
+          "Council retry returned non-completed status",
+        );
+      } catch (err) {
+        log.worker.warn(
+          { subtaskId, model, attempt: attempt + 1, error: String(err) },
+          "Council retry threw",
+        );
+      }
+    }
+
+    log.worker.error(
+      { subtaskId, model, maxRetries: RETRY_CONFIG.maxRetries },
+      "Council worker failed after all retries — proceeding without this model",
+    );
+    return null;
   }
 
   private async runClaude(

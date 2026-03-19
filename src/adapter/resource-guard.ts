@@ -1,4 +1,5 @@
 import { freemem, totalmem, platform } from "node:os";
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 export interface ResourceSnapshot {
@@ -16,13 +17,38 @@ export interface ResourceSnapshot {
 /**
  * Get the actual available memory in bytes, accounting for OS differences.
  *
- * - macOS: os.freemem() excludes inactive/cached pages, making memory look
- *   much more used than it is. We use a higher ceiling (85%) to compensate.
+ * - macOS: os.freemem() only reports "free" pages, excluding inactive and
+ *   purgeable pages that are immediately reclaimable. This makes memory look
+ *   90%+ used even when gigabytes are available. We use vm_stat to compute
+ *   free + inactive + purgeable — matching what Activity Monitor shows.
  * - Linux: os.freemem() returns MemFree which excludes buffers/cache.
  *   We read MemAvailable from /proc/meminfo for the real number.
  * - Windows: os.freemem() returns actual available memory. Works correctly.
  */
 function getAvailableMemoryBytes(): number {
+  if (platform() === "darwin") {
+    try {
+      const vmstat = execSync("vm_stat", { encoding: "utf-8", timeout: 2000 });
+      // vm_stat reports in pages; page size is on the first line
+      const pageSizeMatch = vmstat.match(/page size of (\d+) bytes/);
+      const pageSize = pageSizeMatch ? parseInt(pageSizeMatch[1], 10) : 16384;
+
+      const getPages = (label: string): number => {
+        const match = vmstat.match(new RegExp(`${label}:\\s+(\\d+)`));
+        return match ? parseInt(match[1], 10) : 0;
+      };
+
+      const free = getPages("Pages free");
+      const inactive = getPages("Pages inactive");
+      const purgeable = getPages("Pages purgeable");
+
+      return (free + inactive + purgeable) * pageSize;
+    } catch {
+      // Fallback to os.freemem() if vm_stat fails
+      return freemem();
+    }
+  }
+
   if (platform() === "linux") {
     try {
       const meminfo = readFileSync("/proc/meminfo", "utf-8");
@@ -34,9 +60,9 @@ function getAvailableMemoryBytes(): number {
       // Fallback to os.freemem() if /proc/meminfo is unavailable
     }
   }
-  // macOS and Windows: use os.freemem()
-  // macOS compensates via higher default ceiling (85%)
-  // Windows reports available memory correctly
+
+  // Windows: os.freemem() reports actual available memory correctly.
+  // Also used as fallback for any unrecognized platform.
   return freemem();
 }
 

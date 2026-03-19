@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadEnv } from "./config/env.js";
 import { JobManager } from "./adapter/job-manager.js";
 import { HttpApi } from "./adapter/http-api.js";
@@ -9,6 +12,28 @@ import { CouncilReviewer } from "./agents/council-reviewer.js";
 import { CouncilWorkerAgent } from "./agents/council-worker.js";
 import { WorktreeManager } from "./workspace/worktree-manager.js";
 import { logger, log } from "./logger.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Read the existing API token from mcp-config.json if it exists.
+ * This ensures that restarting serve.ts doesn't invalidate tokens
+ * held by already-running MCP server processes.
+ */
+function readExistingToken(): string | undefined {
+  try {
+    const configPath = resolve(__dirname, "..", "mcp-config.json");
+    const config = JSON.parse(readFileSync(configPath, "utf-8"));
+    const token = config?.mcpServers?.["dev-swarm"]?.env?.DEV_SWARM_API_TOKEN;
+    if (typeof token === "string" && token.length > 0) {
+      log.httpApi.info("Reusing existing API token from mcp-config.json");
+      return token;
+    }
+  } catch {
+    // No existing config — a fresh token will be generated
+  }
+  return undefined;
+}
 
 /**
  * Headless server mode — starts the HTTP API and MCP config only.
@@ -39,7 +64,8 @@ async function main(): Promise<void> {
     () => jobManager.getActiveWorkerCount(),
   );
 
-  const httpApi = new HttpApi(jobManager, resources);
+  const existingToken = readExistingToken();
+  const httpApi = new HttpApi(jobManager, resources, existingToken);
 
   // Generate MCP config BEFORE starting the HTTP API. dev-swarm.ts launches
   // Claude immediately after the health check passes, so the config must be

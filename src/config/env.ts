@@ -12,20 +12,24 @@ config();
 function detectHardware(): { cores: number; ramGb: number; defaultWorkers: number; defaultMemPct: number; os: string } {
   const cores = cpus().length;
   const ramGb = Math.round(totalmem() / (1024 * 1024 * 1024));
-  const defaultWorkers = Math.max(1, Math.floor(cores / 2));
+  // Workers: allow more concurrency — each worker is mostly I/O-bound
+  // (waiting on LLM API responses), not CPU-bound. cores*0.75 is safe.
+  const defaultWorkers = Math.max(2, Math.round(cores * 0.75));
   const os = platform();
 
   // Memory ceiling defaults per OS:
-  // - macOS (darwin): 85% — os.freemem() excludes inactive/cached pages,
-  //   making memory look much more used than it is
-  // - Linux: 80% — we read MemAvailable from /proc/meminfo for accuracy
-  // - Windows (win32): 80% — os.freemem() reports actual available memory
+  // - macOS (darwin): 92% — resource-guard uses vm_stat for accurate
+  //   available memory (free + inactive + purgeable), so the reported
+  //   usage is real. 92% gives enough headroom while avoiding false
+  //   positives that blocked workers at 85%.
+  // - Linux: 90% — MemAvailable from /proc/meminfo is accurate.
+  // - Windows (win32): 90% — os.freemem() reports actual available memory.
   let defaultMemPct: number;
   switch (os) {
-    case "darwin": defaultMemPct = 85; break;
-    case "linux":  defaultMemPct = 80; break;
-    case "win32":  defaultMemPct = 80; break;
-    default:       defaultMemPct = 80; break;
+    case "darwin": defaultMemPct = 92; break;
+    case "linux":  defaultMemPct = 90; break;
+    case "win32":  defaultMemPct = 90; break;
+    default:       defaultMemPct = 90; break;
   }
 
   return { cores, ramGb, defaultWorkers, defaultMemPct, os };
@@ -46,7 +50,7 @@ const envSchema = z.object({
   SYSTEM_PROMPT_PATH: z.string().default("prompts/system.md"),
   MAX_MESSAGE_AGE_MS: z.coerce.number().int().min(5_000).default(60_000), // Ignore messages older than 60s
   CLAUDE_RESPONSE_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(300_000), // 5 min default
-  MEMORY_CEILING_PCT: z.coerce.number().int().min(50).max(95).default(hw.defaultMemPct),
+  MEMORY_CEILING_PCT: z.coerce.number().int().min(50).max(98).default(hw.defaultMemPct),
 
   // Review loop config
   MAX_REVIEW_ITERATIONS: z.coerce.number().int().min(1).max(5).default(3),
