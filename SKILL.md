@@ -48,7 +48,7 @@ User → CTO → Council Workers (Claude + Codex + Gemini) → Best picked → C
 
 **Terminal:**
 ```
-npm run cli
+npm run dev-swarm
 
 You: Add auth to /path/repo. Use council mode.
 You: Review /path/repo for security issues.

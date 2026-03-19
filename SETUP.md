@@ -5,7 +5,7 @@
 - Node.js >= 22
 - npm >= 10
 - A Discord account
-- API keys for: Anthropic (Claude), OpenAI (Codex), and optionally Perplexity
+- CLI tools: Claude (required), Codex (optional), Gemini (optional)
 
 ## Step 1: Discord Bot Setup
 
@@ -107,12 +107,12 @@ If you want to use this as an OpenClaw skill **inside a VM**:
 ## Architecture
 
 ```
-Discord message
-  → Discord Bot (src/orchestrator/discord-bot.ts)
-    → Pipeline (src/orchestrator/pipeline.ts)
-      → CTO Agent (src/agents/cto.ts) — decomposes task
-      → Worker Agents (src/agents/worker.ts) — implement in parallel
-      → Reviewer Agent (src/agents/reviewer.ts) — Codex reviews
-      → Researcher Agent (src/agents/researcher.ts) — Perplexity lookups
-    → Back to Discord with results
+Discord / Terminal
+  → Adapter (src/adapter/discord-adapter.ts or src/dev-swarm.ts)
+    → Job Manager (src/adapter/job-manager.ts)
+      → CTO Agent (src/agents/cto.ts) — decomposes task through MCP tools
+      → Worker Agents (src/agents/worker.ts) — implement in worktrees
+      → Reviewer Agent (src/agents/reviewer.ts) — code review
+      → Council modes: council-worker.ts, council-reviewer.ts
+    → Results back to adapter
 ```
