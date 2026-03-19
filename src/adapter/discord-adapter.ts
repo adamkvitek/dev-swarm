@@ -87,10 +87,13 @@ export class DiscordAdapter {
   private getOrCreateSession(channelId: string): ClaudeSession {
     let session = this.sessions.get(channelId);
     if (!session) {
+      // Build full system prompt with resource status
+      const sysPrompt = this.buildSystemPrompt();
       session = new ClaudeSession(
         this.env.CLAUDE_CLI,
         ["--dangerously-skip-permissions"],
         this.mcpConfigPath ?? undefined,
+        sysPrompt,
       );
       this.sessions.set(channelId, session);
     }
@@ -163,12 +166,8 @@ export class DiscordAdapter {
 
       const session = this.getOrCreateSession(channel.id);
 
-      // Build the prompt
-      // First message includes system prompt; subsequent messages just send the user's text
-      // (Claude remembers the system prompt via --resume)
-      prompt = session.isActive
-        ? `[${message.author.displayName}]: ${content}`
-        : this.buildFirstPrompt(content, message.author.displayName);
+      // Always send just the user message — system prompt is handled by --append-system-prompt
+      prompt = `[${message.author.displayName}]: ${content}`;
 
       const result = await this.sessionLimiter(() =>
         session.send(prompt, {
@@ -210,9 +209,9 @@ export class DiscordAdapter {
   }
 
   /**
-   * Build the first prompt for a new session, including system prompt and resource context.
+   * Build the system prompt (passed via --append-system-prompt, NOT mixed with user message).
    */
-  private buildFirstPrompt(userMessage: string, displayName: string): string {
+  private buildSystemPrompt(): string {
     const parts: string[] = [];
 
     if (this.systemPrompt) {
@@ -227,9 +226,6 @@ export class DiscordAdapter {
     parts.push("");
     parts.push(`## Current System Status`);
     parts.push(this.resources.statusLine());
-
-    parts.push("");
-    parts.push(`[${displayName}]: ${userMessage}`);
 
     return parts.join("\n");
   }

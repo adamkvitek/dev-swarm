@@ -12,21 +12,27 @@ export interface SessionResult {
  * Persistent Claude CLI session.
  * First call creates a new session; subsequent calls resume it with full context.
  * Uses `claude --print --output-format json --resume <id>` under the hood.
+ *
+ * System prompt is passed via --append-system-prompt (proper flag),
+ * NOT mixed into the user message via stdin.
  */
 export class ClaudeSession {
   private sessionId: string | null = null;
   private claudeCli: string;
   private extraArgs: string[];
   private mcpConfigPath: string | null;
+  private systemPrompt: string | null;
 
   constructor(
     claudeCli: string,
     extraArgs: string[] = [],
     mcpConfigPath?: string,
+    systemPrompt?: string,
   ) {
     this.claudeCli = claudeCli;
     this.extraArgs = extraArgs;
     this.mcpConfigPath = mcpConfigPath ?? null;
+    this.systemPrompt = systemPrompt ?? null;
   }
 
   get isActive(): boolean {
@@ -52,6 +58,11 @@ export class ClaudeSession {
       "--output-format", "json",
       ...this.extraArgs,
     ];
+
+    // System prompt via proper flag — only on first message (session remembers it)
+    if (this.systemPrompt && !this.sessionId) {
+      args.push("--append-system-prompt", this.systemPrompt);
+    }
 
     // Add MCP config if available
     if (this.mcpConfigPath) {
