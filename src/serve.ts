@@ -40,9 +40,13 @@ async function main(): Promise<void> {
   );
 
   const httpApi = new HttpApi(jobManager, resources);
-  await httpApi.start(env.MCP_API_HOST, env.MCP_API_PORT);
 
+  // Generate MCP config BEFORE starting the HTTP API. dev-swarm.ts launches
+  // Claude immediately after the health check passes, so the config must be
+  // on disk before /health can respond — otherwise Claude reads a stale file.
   const mcpConfigPath = await generateMcpConfig(env.MCP_API_HOST, env.MCP_API_PORT, httpApi.token);
+
+  await httpApi.start(env.MCP_API_HOST, env.MCP_API_PORT);
 
   // Wire job completion — log to console since there's no adapter
   jobManager.setOnJobComplete((job) => {
