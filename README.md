@@ -178,4 +178,4 @@ npm test
 
 ## License
 
-UNLICENSED — Private project.
+MIT
