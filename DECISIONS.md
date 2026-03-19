@@ -142,3 +142,12 @@
 **Why:** Pino is 5-10x faster than Winston, outputs JSON by default (matches our needs), and follows Unix philosophy — it writes JSON to stdout, you pipe it wherever. We don't need Winston's built-in file rotation or HTTP transports; we're a CLI tool, not a web service. Pino has the highest npm downloads (~22M/week vs Winston's ~19M). Dev experience via `pino-pretty` pipe.
 **Trade-offs:** Less built-in flexibility than Winston. Adding file rotation or remote transport requires s (pino-file, pino-socket). The Unix pipe approach is different from Winston's "configure transports in code" model.
 **Revisit if:** We need complex transport routing (multiple destinations with different filters), or if deployment requires in-process log rotation.
+
+---
+
+## 2026-03-19 — Concrete coding standards over aspirational guidelines for AI agents
+**Chosen:** Structured markdown files with quantified rules (functions under 30 lines, nesting under 3 levels) and bad/good code examples. Universal rules + 8 language-specific standards + 25-point review checklist. Auto-injected based on tech_stack detection.
+**Alternatives:** Aspirational guidelines ("write clean code"), no standards (let agents freestyle), single monolithic document
+**Why:** Research shows AI agents reliably follow concrete, quantified constraints but ignore vague aspirational statements. Per IEEE Spectrum (2026): LLMs increasingly generate code that "appears to work but silently fails" — removing safety checks, generating happy-path-only error handling, inventing dependencies. The standards target these documented anti-patterns specifically. Your friend's 3 principles (specs written down, narrow interfaces, tests for everything) form the universal foundation.
+**Trade-offs:** More context injected into every worker prompt (higher token cost). Standards may conflict with existing project patterns — worker must be told to follow existing patterns first, standards second. Language detection is keyword-based (not file analysis).
+**Revisit if:** Standards are too prescriptive for a specific project type, or if token costs become significant (consider summarizing standards for smaller tasks).
