@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile } from "node:fs/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -13,20 +12,23 @@ const ROOT = resolve(__dirname, "..");
  * Usage: npm run dev-swarm
  */
 async function main(): Promise<void> {
-  // 1. Start the server in the background
+  // 1. Start the server in the background (no shell — direct Node spawn)
   console.log("Starting dev-swarm server...");
-  const server = spawn("npx", ["tsx", resolve(__dirname, "serve.ts")], {
+  const tsxPath = resolve(ROOT, "node_modules", ".bin", "tsx");
+  const server = spawn(process.execPath, [
+    "--no-warnings",
+    tsxPath,
+    resolve(__dirname, "serve.ts"),
+  ], {
     cwd: ROOT,
     stdio: ["ignore", "pipe", "inherit"],
-    shell: true,
   });
 
   // 2. Wait for health check
-  const healthUrl = "http://127.0.0.1:9847/health";
   let ready = false;
   for (let i = 0; i < 30; i++) {
     try {
-      const res = await fetch(healthUrl);
+      const res = await fetch("http://127.0.0.1:9847/health");
       if (res.ok) { ready = true; break; }
     } catch { /* not ready yet */ }
     await new Promise((r) => setTimeout(r, 1000));
@@ -38,42 +40,45 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 3. Load system prompt and MCP config path
   const mcpConfigPath = resolve(ROOT, "mcp-config.json");
-  let systemPrompt: string;
-  try {
-    systemPrompt = await readFile(resolve(ROOT, "prompts", "system.md"), "utf-8");
-  } catch {
-    systemPrompt = "You are Daskyleion, a CTO-level AI agent. Use MCP tools to delegate work to your agent team.";
-  }
 
-  console.log("Server ready. Launching Claude Code with swarm tools...\n");
+  // Short system prompt as CLI arg — full prompt is in prompts/system.md
+  // which Claude reads via CLAUDE.md or the MCP server context
+  const shortPrompt =
+    "You are Daskyleion, a CTO-level AI agent leading a dev swarm. " +
+    "You MUST delegate all work via MCP tools (spawn_workers, spawn_council, spawn_review). " +
+    "Never analyze code yourself. Read prompts/system.md for full instructions.";
 
-  // 4. Launch Claude Code as interactive foreground process
+  console.log("Server ready. Launching Claude Code...\n");
+
+  // 3. Launch Claude Code — NO shell:true (preserves terminal properly)
   const claude = spawn("claude", [
     "--mcp-config", mcpConfigPath,
-    "--append-system-prompt", systemPrompt,
+    "--append-system-prompt", shortPrompt,
   ], {
     cwd: ROOT,
-    stdio: "inherit", // Full interactive: colors, streaming, keyboard
-    shell: true,
+    stdio: "inherit",
   });
 
-  // 5. When Claude exits, stop the server
+  // 4. Cleanup on exit
   claude.on("close", (code) => {
-    console.log("\nShutting down server...");
     server.kill();
     process.exit(code ?? 0);
   });
 
-  // Handle Ctrl+C — kill both
-  const shutdown = (): void => {
-    claude.kill();
+  claude.on("error", (err) => {
+    console.error("Failed to launch Claude Code:", err.message);
+    console.error("Make sure claude is installed: claude --version");
     server.kill();
-    process.exit(0);
-  };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+    process.exit(1);
+  });
+
+  // Let Claude handle Ctrl+C — server cleans up when Claude exits
+  process.on("SIGINT", () => {});
+  process.on("SIGTERM", () => {
+    claude.kill("SIGTERM");
+    server.kill("SIGTERM");
+  });
 }
 
 main().catch((err) => {
