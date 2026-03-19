@@ -66,7 +66,7 @@ cp .env.example .env
 No Discord, no tokens, no external services. Everything stays on your machine.
 
 ```bash
-npm run cli
+npm run dev-swarm
 ```
 
 ```
@@ -193,7 +193,7 @@ All defaults auto-detect from your hardware. Override in `.env`:
 
 | Script | Description |
 |--------|-------------|
-| `npm run cli` | **Terminal mode** — private, no Discord |
+| `npm run dev-swarm` | **Terminal mode** — private, no Discord |
 | `npm run dev` | Discord mode, human-readable logs |
 | `npm start` | Discord mode, production JSON logs |
 | `npm run build` | Compile TypeScript |
