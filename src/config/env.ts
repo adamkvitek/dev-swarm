@@ -40,6 +40,7 @@ const envSchema = z.object({
   // CLI paths (uses existing subscriptions)
   CLAUDE_CLI: z.string().default("claude"),
   CODEX_CLI: z.string().default("codex"),
+  GEMINI_CLI: z.string().default("gemini"),
 
   // Claude adapter
   SYSTEM_PROMPT_PATH: z.string().default("prompts/system.md"),

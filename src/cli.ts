@@ -7,6 +7,7 @@ import { ResourceGuard } from "./adapter/resource-guard.js";
 import { generateMcpConfig } from "./adapter/mcp-config.js";
 import { WorkerAgent } from "./agents/worker.js";
 import { ReviewerAgent } from "./agents/reviewer.js";
+import { CouncilReviewer } from "./agents/council-reviewer.js";
 import { WorktreeManager } from "./workspace/worktree-manager.js";
 import { ClaudeSession } from "./agents/claude-session.js";
 import { logger, log } from "./logger.js";
@@ -27,7 +28,8 @@ async function main(): Promise<void> {
 
   const workerAgent = new WorkerAgent(env);
   const reviewerAgent = new ReviewerAgent(env);
-  const jobManager = new JobManager(env, workerAgent, reviewerAgent, worktreeManager);
+  const councilReviewer = new CouncilReviewer(env);
+  const jobManager = new JobManager(env, workerAgent, reviewerAgent, worktreeManager, councilReviewer);
 
   const resources = new ResourceGuard(
     env.MEMORY_CEILING_PCT,

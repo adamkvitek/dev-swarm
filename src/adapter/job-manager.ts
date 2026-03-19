@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { WorkerAgent, WorkerResult } from "../agents/worker.js";
 import type { ReviewerAgent, ReviewResult } from "../agents/reviewer.js";
+import type { CouncilReviewer } from "../agents/council-reviewer.js";
 import type { Subtask } from "../agents/cto.js";
 import type { Env } from "../config/env.js";
 import type { WorktreeManager, MergeResult } from "../workspace/worktree-manager.js";
@@ -52,6 +53,7 @@ export class JobManager {
   private evictionTimer: ReturnType<typeof setInterval>;
   private workerAgent: WorkerAgent;
   private reviewerAgent: ReviewerAgent;
+  private councilReviewer: CouncilReviewer | null;
   private worktreeManager: WorktreeManager;
   private env: Env;
   private onJobComplete: JobCompleteCallback | null = null;
@@ -61,10 +63,12 @@ export class JobManager {
     workerAgent: WorkerAgent,
     reviewerAgent: ReviewerAgent,
     worktreeManager: WorktreeManager,
+    councilReviewer?: CouncilReviewer,
   ) {
     this.env = env;
     this.workerAgent = workerAgent;
     this.reviewerAgent = reviewerAgent;
+    this.councilReviewer = councilReviewer ?? null;
     this.worktreeManager = worktreeManager;
 
     // Evict completed/failed jobs older than 1 hour
@@ -161,12 +165,16 @@ export class JobManager {
 
     void this.runJob(
       job,
-      () => this.reviewerAgent.review(
-        workerJob.workerResults!,
-        taskDescription,
-        iteration,
-        this.abortControllers.get(job.id)?.signal,
-      ),
+      () => {
+        // Use council reviewer if available, otherwise single reviewer
+        const reviewer = this.councilReviewer ?? this.reviewerAgent;
+        return reviewer.review(
+          workerJob.workerResults!,
+          taskDescription,
+          iteration,
+          this.abortControllers.get(job.id)?.signal,
+        );
+      },
       (result) => { job.reviewResult = result; },
       `Review job ${job.id} completed (verdict: ${workerJob.workerResults ? "pending" : "unknown"})`,
     );
