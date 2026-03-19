@@ -16,16 +16,30 @@ export async function generateMcpConfig(
   port: number,
   apiToken: string,
 ): Promise<string> {
-  // Resolve the compiled server entry point relative to this file's dist location
-  // Both this file and server.ts compile to dist/, so:
-  // dist/adapter/mcp-config.js → dist/mcp/server.js
-  const serverPath = resolve(__dirname, "..", "mcp", "server.js");
+  // Detect whether we're running from src/ (tsx dev mode) or dist/ (compiled).
+  // tsx preserves the .ts extension in import.meta.url; compiled JS uses .js.
+  const isTsxMode = import.meta.url.endsWith(".ts");
+  const serverExt = isTsxMode ? "server.ts" : "server.js";
+  const serverPath = resolve(__dirname, "..", "mcp", serverExt);
+  const projectRoot = resolve(__dirname, "..", "..");
+
+  // In tsx mode, use the local tsx binary to run the .ts server directly.
+  // In compiled mode, use node with the .js file from dist/.
+  let command: string;
+  let args: string[];
+  if (isTsxMode) {
+    command = resolve(projectRoot, "node_modules", ".bin", "tsx");
+    args = [serverPath];
+  } else {
+    command = "node";
+    args = [serverPath];
+  }
 
   const config = {
     mcpServers: {
       "dev-swarm": {
-        command: "node",
-        args: [serverPath],
+        command,
+        args,
         env: {
           DEV_SWARM_API_URL: `http://${host}:${port}`,
           DEV_SWARM_API_TOKEN: apiToken,
@@ -34,7 +48,7 @@ export async function generateMcpConfig(
     },
   };
 
-  const configPath = resolve(__dirname, "..", "..", "mcp-config.json");
+  const configPath = resolve(projectRoot, "mcp-config.json");
   await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
 
   log.mcp.info({ configPath, apiHost: host, apiPort: port }, "MCP config written");
