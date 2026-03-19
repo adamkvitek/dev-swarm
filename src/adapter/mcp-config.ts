@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { log } from "../logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -36,6 +37,6 @@ export async function generateMcpConfig(
   const configPath = resolve(__dirname, "..", "..", "mcp-config.json");
   await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
 
-  console.log(`[mcp-config] Written to ${configPath} (API: ${host}:${port})`);
+  log.mcp.info({ configPath, apiHost: host, apiPort: port }, "MCP config written");
   return configPath;
 }

@@ -1,5 +1,6 @@
 import pLimit from "p-limit";
 import { runCli } from "./cli-runner.js";
+import { log } from "../logger.js";
 import type { Env } from "../config/env.js";
 import type { Subtask } from "./cto.js";
 import type { WorktreeManager, WorktreeInfo } from "../workspace/worktree-manager.js";
@@ -52,7 +53,7 @@ export class WorkerAgent {
       );
     }
 
-    console.log(`[WORKER ${subtask.id}] ${subtask.title} — starting in ${context.worktreeInfo.path}`);
+    log.worker.info({ subtaskId: subtask.id, title: subtask.title, workDir: context.worktreeInfo.path }, "Starting worker");
 
     const prompt = promptParts.join("\n");
 
@@ -62,7 +63,7 @@ export class WorkerAgent {
       : WORKER_SYSTEM_PROMPT;
 
     if (context.worktreeInfo.isSelfRepo) {
-      console.warn(`[WORKER ${subtask.id}] SELF-REPO MODE — control plane restrictions active`);
+      log.worker.warn({ subtaskId: subtask.id }, "SELF-REPO MODE — control plane restrictions active");
     }
 
     const result = await runCli(this.claudeCli, [
@@ -77,7 +78,7 @@ export class WorkerAgent {
     });
 
     if (result.exitCode !== 0) {
-      console.log(`[WORKER ${subtask.id}] Failed (exit ${result.exitCode})`);
+      log.worker.info({ subtaskId: subtask.id, exitCode: result.exitCode }, "Worker failed");
       return {
         subtaskId: subtask.id,
         status: "blocked",
@@ -90,7 +91,7 @@ export class WorkerAgent {
     }
 
     const text = result.stdout.trim();
-    console.log(`[WORKER ${subtask.id}] Completed (${text.length} chars output)`);
+    log.worker.info({ subtaskId: subtask.id, outputChars: text.length }, "Worker completed");
 
     // Capture what changed in the worktree
     const diffResult = await runCli("git", ["diff", "HEAD"], {
@@ -173,7 +174,7 @@ export class WorkerAgent {
     onWorkerDone?: (result: WorkerResult, index: number, total: number) => void | Promise<void>
   ): Promise<WorkerResult[]> {
     const maxConcurrent = this.env.MAX_CONCURRENT_WORKERS;
-    console.log(`[WORKERS] Dispatching ${subtasks.length} workers (max ${maxConcurrent} concurrent)`);
+    log.worker.info({ total: subtasks.length, maxConcurrent }, "Dispatching workers");
 
     // Create all worktrees sequentially (avoids git lock conflicts)
     // Use Map keyed by subtask ID — avoids fragile array index coupling
@@ -212,7 +213,7 @@ export class WorkerAgent {
     );
 
     const completed = results.filter((r) => r.status === "completed").length;
-    console.log(`[WORKERS] Done: ${completed}/${subtasks.length} completed`);
+    log.worker.info({ completed, total: subtasks.length }, "All workers done");
     return results;
   }
 }

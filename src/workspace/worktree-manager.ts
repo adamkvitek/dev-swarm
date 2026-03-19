@@ -2,6 +2,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { runCli } from "../agents/cli-runner.js";
+import { log } from "../logger.js";
 import {
   validateChangedFiles,
   getWorktreeChangedFiles,
@@ -46,7 +47,7 @@ export class WorktreeManager {
 
   async initialize(): Promise<void> {
     await mkdir(this.workspaceDir, { recursive: true });
-    console.log(`[worktree] Workspace initialized at ${this.workspaceDir}`);
+    log.worktree.info({ path: this.workspaceDir }, "Workspace initialized");
   }
 
   /**
@@ -122,7 +123,7 @@ export class WorktreeManager {
     let validation: DiffValidation = { safe: true, controlPlaneFiles: [], neverModifyFiles: [] };
 
     if (selfRepo) {
-      console.log(`[worktree] SELF-REPO DETECTED — validating worker changes against control plane`);
+      log.worktree.info("SELF-REPO DETECTED — validating worker changes against control plane");
 
       // Collect all changed files across worker branches
       const allChangedFiles: string[] = [];
@@ -135,7 +136,7 @@ export class WorktreeManager {
       validation = validateChangedFiles(uniqueFiles);
 
       if (!validation.safe) {
-        console.warn(`[worktree] CONTROL PLANE VIOLATION: ${validation.reason}`);
+        log.worktree.warn({ reason: validation.reason }, "CONTROL PLANE VIOLATION");
         // Still create the branch so a human can review, but DON'T merge
         // The branch exists with the worker commits for inspection
       }
@@ -178,9 +179,9 @@ export class WorktreeManager {
     await runCli("git", ["-C", repoPath, "checkout", "-"], { timeoutMs: 10_000 });
 
     const merged = validation.safe;
-    console.log(
-      `[worktree] ${merged ? "Merged" : "Created (PENDING HUMAN REVIEW)"} ` +
-      `${workerBranches.length} branches into ${featureBranch}`,
+    log.worktree.info(
+      { featureBranch, branchCount: workerBranches.length, merged },
+      merged ? "Merged branches into feature branch" : "Created feature branch (PENDING HUMAN REVIEW)",
     );
 
     return { featureBranch, validation, merged };
@@ -193,7 +194,7 @@ export class WorktreeManager {
     const all = Array.from(this.worktrees.values());
     this.worktrees.clear();
     await Promise.all(all.map((info) => this.doRemove(info)));
-    console.log(`[worktree] Cleaned up ${all.length} worktrees`);
+    log.worktree.info({ count: all.length }, "Cleaned up worktrees");
   }
 
   /**
@@ -236,7 +237,7 @@ export class WorktreeManager {
 
     const selfRepo = await isSelfRepo(repoPath);
     if (selfRepo) {
-      console.warn(`[worktree] SELF-REPO: Worker ${subtaskId} targeting bot's own codebase`);
+      log.worktree.warn({ subtaskId }, "SELF-REPO: Worker targeting bot's own codebase");
     }
 
     const info: WorktreeInfo = {
@@ -249,7 +250,7 @@ export class WorktreeManager {
     };
 
     this.worktrees.set(worktreeKey(jobId, subtaskId), info);
-    console.log(`[worktree] Created ${worktreePath} (branch: ${branch})`);
+    log.worktree.info({ path: worktreePath, branch }, "Created worktree");
     return info;
   }
 
@@ -269,7 +270,7 @@ export class WorktreeManager {
     );
     if (removeResult.exitCode !== 0) {
       // Worktree dir might already be gone — try rm as fallback
-      console.warn(`[worktree] git worktree remove failed, cleaning up manually: ${removeResult.stderr}`);
+      log.worktree.warn({ path: info.path, stderr: removeResult.stderr }, "git worktree remove failed, cleaning up manually");
       await rm(info.path, { recursive: true, force: true });
     }
 
@@ -279,7 +280,7 @@ export class WorktreeManager {
       ["-C", info.repoPath, "branch", "-D", info.branch],
       { timeoutMs: 10_000 },
     );
-    console.log(`[worktree] Removed ${info.path} (branch: ${info.branch})`);
+    log.worktree.info({ path: info.path, branch: info.branch }, "Removed worktree");
   }
 
   /**
@@ -325,11 +326,11 @@ async function retryWithBackoff(fn: () => Promise<void>, label: string): Promise
       return;
     } catch (err) {
       if (attempt === RETRY_DELAYS_MS.length) {
-        console.error(`[worktree] Cleanup failed after ${attempt + 1} attempts for ${label}:`, err);
+        log.worktree.error({ err, label, attempts: attempt + 1 }, "Cleanup failed after retries");
         return; // Give up — don't crash the process over cleanup
       }
       const delay = RETRY_DELAYS_MS[attempt];
-      console.warn(`[worktree] Cleanup attempt ${attempt + 1} failed for ${label}, retrying in ${delay / 1000}s`);
+      log.worktree.warn({ label, attempt: attempt + 1, retryInSeconds: delay / 1000 }, "Cleanup attempt failed, retrying");
       await new Promise((r) => setTimeout(r, delay));
     }
   }
