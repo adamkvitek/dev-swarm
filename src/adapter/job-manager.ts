@@ -26,6 +26,7 @@ export interface Job {
 export type JobCompleteCallback = (job: Job) => void | Promise<void>;
 
 const JOB_EVICTION_MS = 60 * 60 * 1000; // 1 hour
+const MAX_STORED_JOBS = 1000;
 
 /**
  * Manages long-lived worker and review jobs.
@@ -57,7 +58,13 @@ export class JobManager {
     this.worktreeManager = worktreeManager;
 
     // Evict completed/failed jobs older than 1 hour
-    this.evictionTimer = setInterval(() => this.evictOldJobs(), 5 * 60 * 1000);
+    this.evictionTimer = setInterval(() => {
+      try {
+        this.evictOldJobs();
+      } catch (err) {
+        console.error("[job-manager] Eviction timer error:", err);
+      }
+    }, 5 * 60 * 1000);
     this.evictionTimer.unref();
   }
 
@@ -99,13 +106,21 @@ export class JobManager {
       subtasks,
       repoPath,
     };
-    this.jobs.set(job.id, job);
-
-    const ac = new AbortController();
-    this.abortControllers.set(job.id, ac);
+    this.storeJob(job);
 
     // Fire and forget — runs in background, calls onJobComplete when done
-    void this.runWorkerJob(job, techStack, previousFeedback, ac.signal);
+    void this.runJob(
+      job,
+      () => this.workerAgent.executeParallel(job.subtasks!, {
+        techStack,
+        repoPath: job.repoPath!,
+        worktreeManager: this.worktreeManager,
+        previousFeedback,
+        signal: this.abortControllers.get(job.id)!.signal,
+      }),
+      (results) => { job.workerResults = results; },
+      `Worker job ${job.id} completed (${subtasks.length} subtasks)`,
+    );
 
     return job;
   }
@@ -132,26 +147,26 @@ export class JobManager {
       createdAt: Date.now(),
       repoPath: workerJob.repoPath,
     };
-    this.jobs.set(job.id, job);
+    this.storeJob(job);
 
-    const ac = new AbortController();
-    this.abortControllers.set(job.id, ac);
-
-    void this.runReviewJob(job, workerJob.workerResults, taskDescription, iteration, ac.signal);
+    void this.runJob(
+      job,
+      () => this.reviewerAgent.review(
+        workerJob.workerResults!,
+        taskDescription,
+        iteration,
+        this.abortControllers.get(job.id)?.signal,
+      ),
+      (result) => { job.reviewResult = result; },
+      `Review job ${job.id} completed (verdict: ${workerJob.workerResults ? "pending" : "unknown"})`,
+    );
 
     return job;
   }
 
   /**
    * Merge worker branches for a job into a feature branch.
-   * Called externally after an APPROVE verdict.
-   */
-  /**
-   * Merge worker branches for a job into a feature branch.
    * Returns the merge result including safety validation status.
-   *
-   * If the target is the bot's own repo and control plane files were touched,
-   * the branch is created but flagged as requiring human review.
    */
   async mergeJob(jobId: string, taskSummary: string): Promise<MergeResult> {
     const job = this.jobs.get(jobId);
@@ -159,7 +174,6 @@ export class JobManager {
       throw new Error(`Job ${jobId} not found or has no repo path`);
     }
 
-    // Find the worker job — if this is a review job, look at the original worker results
     const workerJob = job.type === "workers" ? job : this.findWorkerJobForReview(jobId);
     if (!workerJob?.repoPath) {
       throw new Error(`No worker job with repo path found for ${jobId}`);
@@ -188,7 +202,6 @@ export class JobManager {
     job.status = "cancelled";
     job.completedAt = Date.now();
 
-    // Clean up worktrees for cancelled jobs
     void this.worktreeManager.removeByJob(jobId).catch((err) => {
       console.error(`[job-manager] Worktree cleanup failed for cancelled job ${jobId}:`, err);
     });
@@ -226,92 +239,65 @@ export class JobManager {
   destroy(): void {
     this.cancelAllJobs();
     clearInterval(this.evictionTimer);
-    // removeAll is async — fire and forget on destroy
     void this.worktreeManager.removeAll().catch((err) => {
       console.error("[job-manager] Worktree cleanup on destroy failed:", err);
     });
   }
 
-  private async runWorkerJob(
-    job: Job,
-    techStack: string[],
-    previousFeedback: string | undefined,
-    signal: AbortSignal,
-  ): Promise<void> {
-    try {
-      if (signal.aborted) return;
+  // --- Internal helpers ---
 
-      const results = await this.workerAgent.executeParallel(
-        job.subtasks!,
-        {
-          techStack,
-          repoPath: job.repoPath!,
-          worktreeManager: this.worktreeManager,
-          previousFeedback,
-          signal,
-        },
-      );
-
-      if (signal.aborted) return;
-
-      job.workerResults = results;
-      job.status = "completed";
-      job.completedAt = Date.now();
-
-      console.log(`[job-manager] Worker job ${job.id} completed (${results.length} results)`);
-    } catch (err) {
-      if (signal.aborted) return;
-
-      job.status = "failed";
-      job.error = err instanceof Error ? err.message : String(err);
-      job.completedAt = Date.now();
-
-      console.error(`[job-manager] Worker job ${job.id} failed:`, job.error);
-    } finally {
-      this.abortControllers.delete(job.id);
-      if (this.onJobComplete && !signal.aborted) {
-        await Promise.resolve(this.onJobComplete(job)).catch((err) => {
-          console.error(`[job-manager] onJobComplete callback error:`, err);
-        });
-      }
+  /**
+   * Store a job with hard cap enforcement.
+   * Prevents unbounded Map growth by evicting oldest completed jobs when at capacity.
+   */
+  private storeJob(job: Job): void {
+    if (this.jobs.size >= MAX_STORED_JOBS) {
+      this.evictOldest();
     }
+
+    this.jobs.set(job.id, job);
+
+    const ac = new AbortController();
+    this.abortControllers.set(job.id, ac);
   }
 
-  private async runReviewJob(
+  /**
+   * Generic job runner — eliminates duplication between worker and review jobs.
+   *
+   * Handles: abort check, execution, status transitions, error handling,
+   * abort controller cleanup, and completion callback.
+   */
+  private async runJob<T>(
     job: Job,
-    workerResults: WorkerResult[],
-    taskDescription: string,
-    iteration: number,
-    signal: AbortSignal,
+    execute: () => Promise<T>,
+    onSuccess: (result: T) => void,
+    successLog: string,
   ): Promise<void> {
+    const signal = this.abortControllers.get(job.id)?.signal;
+
     try {
-      if (signal.aborted) return;
+      if (signal?.aborted) return;
 
-      const result = await this.reviewerAgent.review(
-        workerResults,
-        taskDescription,
-        iteration,
-        signal,
-      );
+      const result = await execute();
 
-      if (signal.aborted) return;
+      if (signal?.aborted) return;
 
-      job.reviewResult = result;
+      onSuccess(result);
       job.status = "completed";
       job.completedAt = Date.now();
 
-      console.log(`[job-manager] Review job ${job.id} completed (verdict: ${result.verdict})`);
+      console.log(`[job-manager] ${successLog}`);
     } catch (err) {
-      if (signal.aborted) return;
+      if (signal?.aborted) return;
 
       job.status = "failed";
       job.error = err instanceof Error ? err.message : String(err);
       job.completedAt = Date.now();
 
-      console.error(`[job-manager] Review job ${job.id} failed:`, job.error);
+      console.error(`[job-manager] Job ${job.id} failed:`, job.error);
     } finally {
       this.abortControllers.delete(job.id);
-      if (this.onJobComplete && !signal.aborted) {
+      if (this.onJobComplete && !signal?.aborted) {
         await Promise.resolve(this.onJobComplete(job)).catch((err) => {
           console.error(`[job-manager] onJobComplete callback error:`, err);
         });
@@ -327,7 +313,6 @@ export class JobManager {
         job.status !== "running" &&
         now - job.completedAt > JOB_EVICTION_MS
       ) {
-        // Clean up worktrees for evicted jobs
         void this.worktreeManager.removeByJob(id).catch((err) => {
           console.error(`[job-manager] Worktree cleanup on eviction failed for ${id}:`, err);
         });
@@ -338,14 +323,28 @@ export class JobManager {
   }
 
   /**
-   * Find the original worker job that a review is based on.
-   * Looks through all completed worker jobs in the same channel.
+   * Evict the oldest completed/failed jobs to stay under MAX_STORED_JOBS.
    */
+  private evictOldest(): void {
+    const completed = Array.from(this.jobs.entries())
+      .filter(([, j]) => j.status !== "running")
+      .sort(([, a], [, b]) => (a.completedAt ?? a.createdAt) - (b.completedAt ?? b.createdAt));
+
+    const toEvict = completed.slice(0, Math.max(1, completed.length - MAX_STORED_JOBS + 100));
+    for (const [id] of toEvict) {
+      void this.worktreeManager.removeByJob(id).catch(() => {});
+      this.jobs.delete(id);
+    }
+
+    if (toEvict.length > 0) {
+      console.log(`[job-manager] Hard cap: evicted ${toEvict.length} oldest jobs`);
+    }
+  }
+
   private findWorkerJobForReview(reviewJobId: string): Job | undefined {
     const reviewJob = this.jobs.get(reviewJobId);
     if (!reviewJob) return undefined;
 
-    // Look for the most recent completed worker job in the same channel with a repoPath
     let best: Job | undefined;
     for (const job of this.jobs.values()) {
       if (

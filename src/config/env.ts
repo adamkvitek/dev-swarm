@@ -1,8 +1,23 @@
 import { z } from "zod";
-import { homedir } from "node:os";
+import { cpus, homedir, totalmem } from "node:os";
 import { config } from "dotenv";
 
 config();
+
+/**
+ * Derive sensible defaults from the current machine's hardware.
+ * Goal: 50% of CPU cores for workers, 50% of RAM as memory ceiling.
+ */
+function detectHardware(): { cores: number; ramGb: number; defaultWorkers: number; defaultMemPct: number } {
+  const cores = cpus().length;
+  const ramGb = Math.round(totalmem() / (1024 * 1024 * 1024));
+  const defaultWorkers = Math.max(1, Math.floor(cores / 2));
+  // Memory ceiling: 50% of RAM, clamped to 50-95 range
+  const defaultMemPct = Math.min(95, Math.max(50, 50));
+  return { cores, ramGb, defaultWorkers, defaultMemPct };
+}
+
+const hw = detectHardware();
 
 const envSchema = z.object({
   // Required
@@ -16,7 +31,7 @@ const envSchema = z.object({
   SYSTEM_PROMPT_PATH: z.string().default("prompts/system.md"),
   MAX_MESSAGE_AGE_MS: z.coerce.number().int().min(5_000).default(60_000), // Ignore messages older than 60s
   CLAUDE_RESPONSE_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(300_000), // 5 min default
-  MEMORY_CEILING_PCT: z.coerce.number().int().min(50).max(95).default(80),
+  MEMORY_CEILING_PCT: z.coerce.number().int().min(50).max(95).default(hw.defaultMemPct),
 
   // Review loop config
   MAX_REVIEW_ITERATIONS: z.coerce.number().int().min(1).max(5).default(3),
@@ -24,8 +39,8 @@ const envSchema = z.object({
   WORKSPACE_DIR: z.string().default("~/dev/swarm-workspace")
     .transform((p) => p.startsWith("~") ? p.replace("~", homedir()) : p),
 
-  // Concurrency and timeouts
-  MAX_CONCURRENT_WORKERS: z.coerce.number().int().min(1).max(15).default(4),
+  // Concurrency and timeouts — defaults derived from hardware
+  MAX_CONCURRENT_WORKERS: z.coerce.number().int().min(1).max(15).default(hw.defaultWorkers),
   PIPELINE_TIMEOUT_MS: z.coerce.number().int().min(60_000).default(14_400_000), // 4 hours
 
   // MCP internal API
@@ -35,6 +50,11 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+/**
+ * Detected hardware info — exposed for logging and first-run messages.
+ */
+export const detectedHardware = hw;
+
 export function loadEnv(): Env {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
@@ -43,5 +63,12 @@ export function loadEnv(): Env {
       .join("\n");
     throw new Error(`Environment validation failed:\n${missing}`);
   }
-  return result.data;
+
+  const env = result.data;
+  console.log(
+    `[config] Hardware: ${hw.cores} cores, ${hw.ramGb}GB RAM → ` +
+    `workers=${env.MAX_CONCURRENT_WORKERS}, memory_ceiling=${env.MEMORY_CEILING_PCT}%`,
+  );
+
+  return env;
 }
