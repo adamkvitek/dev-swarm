@@ -1,5 +1,6 @@
 import pLimit from "p-limit";
 import { runCli } from "./cli-runner.js";
+import { WORKER_SYSTEM_PROMPT, extractSummary } from "./shared.js";
 import { log } from "../logger.js";
 import type { Env } from "../config/env.js";
 import type { Subtask } from "./cto.js";
@@ -16,14 +17,6 @@ export interface WorkerResult {
   summary: string;
   blockerReason?: string;
 }
-
-const WORKER_SYSTEM_PROMPT = `You are a senior developer agent working on a real codebase.
-Read relevant existing code before writing. Write clean production code.
-Follow existing patterns and conventions you find in the codebase.
-Run tests if a test runner exists (check package.json scripts, Makefile, etc.).
-Include error handling and proper types.
-
-When done, provide a brief summary of what you changed and why.`;
 
 export class WorkerAgent {
   private claudeCli: string;
@@ -220,13 +213,3 @@ export class WorkerAgent {
   }
 }
 
-/**
- * Extract a summary from Claude's text output.
- * Takes the last paragraph or last few lines as a summary.
- */
-function extractSummary(text: string): string {
-  const lines = text.trim().split("\n");
-  // Take up to the last 10 lines as summary
-  const summaryLines = lines.slice(-10);
-  return summaryLines.join("\n").slice(0, 2000);
-}

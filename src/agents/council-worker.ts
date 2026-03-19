@@ -1,4 +1,5 @@
 import { runCli } from "./cli-runner.js";
+import { WORKER_SYSTEM_PROMPT, extractSummary } from "./shared.js";
 import { log } from "../logger.js";
 import { buildWorkerStandards } from "./standards-loader.js";
 import { SELF_REPO_WORKER_ADDENDUM } from "../workspace/control-plane.js";
@@ -24,14 +25,6 @@ export interface CouncilSubtaskResult {
   bestResult: WorkerResult;
   reasoning: string;
 }
-
-const WORKER_SYSTEM_PROMPT = `You are a senior developer agent working on a real codebase.
-Read relevant existing code before writing. Write clean production code.
-Follow existing patterns and conventions you find in the codebase.
-Run tests if a test runner exists (check package.json scripts, Makefile, etc.).
-Include error handling and proper types.
-
-When done, provide a brief summary of what you changed and why.`;
 
 /**
  * Council Worker — fans out each subtask to multiple AI models.
@@ -161,9 +154,9 @@ export class CouncilWorkerAgent {
           diff: "",
           files: [],
           summary: "",
-          blockerReason: "Both council workers failed",
+          blockerReason: "All council workers failed",
         },
-        reasoning: "Both models failed to produce an implementation",
+        reasoning: "All models failed to produce an implementation",
       };
     }
 
@@ -301,29 +294,32 @@ export class CouncilWorkerAgent {
   }
 
   /**
-   * Compare two implementations and pick the best one.
+   * Compare implementations and pick the best one.
    * Uses Claude as the judge (fast, good at analysis).
+   * Handles 2 or 3 implementations (A/B/C).
    */
   private async pickBest(
     subtask: Subtask,
     implementations: CouncilWorkerResult[],
     signal?: AbortSignal,
   ): Promise<CouncilSubtaskResult> {
+    const labels = implementations.map((_, i) => String.fromCharCode(65 + i)); // A, B, C...
     const comparison = implementations.map((impl, i) => {
-      const label = `Implementation ${String.fromCharCode(65 + i)}`;
+      const label = `Implementation ${labels[i]}`;
       return `### ${label}\nModel: [anonymized]\nFiles changed: ${impl.files.join(", ")}\nSummary: ${impl.summary}\n\nDiff:\n\`\`\`\n${impl.diff.slice(0, 8_000)}\n\`\`\``;
     }).join("\n\n---\n\n");
 
+    const labelList = labels.join("', '");
     const judgePrompt = [
       `Task: ${subtask.title}`,
       subtask.description,
       "",
-      "Two different AI models implemented this task independently. Compare them:",
+      `${implementations.length} different AI models implemented this task independently. Compare them:`,
       "",
       comparison,
       "",
       "Which implementation is better? Consider: correctness, code quality, completeness, test coverage.",
-      "Respond with ONLY: 'A' or 'B' followed by a brief reason.",
+      `Respond with ONLY: '${labels.join("' or '")}' followed by a brief reason.`,
     ].join("\n");
 
     const result = await runCli(this.claudeCli, [
@@ -335,8 +331,10 @@ export class CouncilWorkerAgent {
 
     if (result.exitCode === 0) {
       const text = result.stdout.trim();
-      if (text.toUpperCase().startsWith("B")) {
-        bestIdx = 1;
+      const firstChar = text.charAt(0).toUpperCase();
+      const chosenIdx = labels.indexOf(firstChar);
+      if (chosenIdx >= 0) {
+        bestIdx = chosenIdx;
       }
       reasoning = text.slice(0, 500);
     }
@@ -369,7 +367,3 @@ export class CouncilWorkerAgent {
   }
 }
 
-function extractSummary(text: string): string {
-  const lines = text.trim().split("\n");
-  return lines.slice(-10).join("\n").slice(0, 2000);
-}
