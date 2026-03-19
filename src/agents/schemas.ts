@@ -15,7 +15,6 @@ export const claudeSessionResponseSchema = z.object({
   total_cost_usd: z.number(),
   duration_ms: z.number(),
 });
-export type ClaudeSessionResponse = z.infer<typeof claudeSessionResponseSchema>;
 
 /** CTO agent response */
 export const ctoResponseSchema = z.object({
@@ -32,7 +31,6 @@ export const ctoResponseSchema = z.object({
     decisions: z.array(z.string()),
   }).nullable(),
 });
-export type CTOResponse = z.infer<typeof ctoResponseSchema>;
 
 /** Reviewer agent response (from Codex) */
 export const reviewerResponseSchema = z.object({
@@ -47,7 +45,6 @@ export const reviewerResponseSchema = z.object({
   feedback: z.string(),
   issuesBySubtask: z.record(z.string(), z.array(z.string())),
 });
-export type ReviewerResponse = z.infer<typeof reviewerResponseSchema>;
 
 /**
  * Safely parse JSON from CLI stdout.
