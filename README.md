@@ -1,29 +1,56 @@
 # Dev Swarm
 
-AI development team orchestrator. Coordinates parallel AI worker agents to build software — with cross-model code review (Codex), isolated git worktrees, and enforced coding standards.
+AI development team orchestrator. Multiple AI models (Claude, Codex, Gemini) work together — writing code in parallel, reviewing anonymously, and selecting the best implementation.
 
-Runs in two modes: **Discord bot** for team collaboration, or **Terminal** for private/company work.
+Runs in two modes: **Terminal** (private, no data leaves your machine) or **Discord** (team collaboration).
 
 ## How It Works
 
-1. You give the bot a task and a repo path (via Discord or terminal)
-2. Claude (the CTO) breaks the task into subtasks
-3. Parallel worker agents execute in isolated git worktrees — reading real code, writing files, running tests
-4. A reviewer agent (Codex/o3) reviews the output with full filesystem access
-5. If approved, changes are merged to a feature branch. If not, workers iterate with feedback.
+```
+You: "Add JWT auth to /path/my-app. Use council mode."
 
-Workers receive language-specific coding standards (TypeScript, Python, Go, Rust, Java, C#, C/C++, Swift, Ruby) and a 35-point review checklist covering OWASP security, memory safety, and AI anti-patterns.
+                    CTO (Claude)
+                    breaks it down
+                         │
+            ┌────────────┼────────────┐
+            ▼            ▼            ▼
+        Claude        Codex        Gemini
+        writes        writes       writes
+        code          code         code
+        (worktree 1)  (worktree 2) (worktree 3)
+            │            │            │
+            └────────────┼────────────┘
+                         ▼
+              Judge picks best implementation
+              (anonymized comparison)
+                         │
+            ┌────────────┼────────────┐
+            ▼            ▼            ▼
+        Claude        Codex        Gemini
+        reviews       reviews      reviews
+        (Reviewer A)  (Reviewer B) (Reviewer C)
+            │            │            │
+            └────────────┼────────────┘
+                         ▼
+              Cross-rank (who was most thorough?)
+                         ▼
+              CTO synthesizes final verdict
+                         ▼
+                 APPROVE → feature branch
+                 REVISE → iterate with feedback
+```
 
 ## Prerequisites
 
-| Requirement | Check | Install |
-|-------------|-------|---------|
-| Node.js 22+ | `node --version` | [nodejs.org](https://nodejs.org) |
-| Claude CLI | `claude --version` | [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) |
-| Codex CLI | `codex --version` | [Codex GitHub](https://github.com/openai/codex) |
-| Git | `git --version` | Already installed on most systems |
+| Requirement | Check | Notes |
+|-------------|-------|-------|
+| Node.js 22+ | `node --version` | Required |
+| Claude CLI | `claude --version` | Primary worker + CTO |
+| Codex CLI | `codex --version` | Council worker + reviewer |
+| Gemini CLI | `gemini --version` | Council worker + reviewer + multimodal |
+| Git | `git --version` | Worktree management |
 
-Discord bot token is only needed for Discord mode — terminal mode works without it.
+Not all CLIs are required — the system degrades gracefully. Claude is the minimum.
 
 ## Quick Start
 
@@ -34,15 +61,13 @@ npm install
 cp .env.example .env
 ```
 
-### Terminal Mode (no Discord, private data stays local)
+### Terminal Mode (recommended for private/company data)
 
-No setup needed beyond the prerequisites. No tokens, no accounts.
+No Discord, no tokens, no external services. Everything stays on your machine.
 
 ```bash
 npm run cli
 ```
-
-You get an interactive session:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -52,150 +77,139 @@ You get an interactive session:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 You: Review /Users/adam/projects/my-app for code quality. Use TypeScript standards.
-```
 
-Use this mode when:
-- Working with company/private code
-- You don't want data going through Discord
-- You want a quick local session
-- Testing the pipeline
+Daskyleion: I'll review your app. Let me check resources and spawn the review council...
+[spawns Claude + Codex + Gemini reviewers in parallel]
+...
+Council verdict: REVISE (avg 6.8/10)
+- Reviewer A (ranked #1): Found SQL injection in auth.ts:42
+- Reviewer B (ranked #2): Missing error handling in api/users.ts
+- Reviewer C (ranked #3): No tests for the payment module
+```
 
 ### Discord Mode (team collaboration)
 
-#### 1. Create a Discord bot
-
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. **New Application** → name it (e.g. "Daskyleion")
-3. **Bot** tab:
-   - Click **Reset Token** → copy the token
-   - Enable **Message Content Intent** (required to read messages)
-4. **OAuth2 → URL Generator**:
-   - Scopes: `bot`
+1. Create a bot at [Discord Developer Portal](https://discord.com/developers/applications)
+   - Enable **Message Content Intent**
    - Permissions: `Send Messages`, `Read Message History`
-   - Copy the generated URL → open it → add the bot to your server
-
-#### 2. Configure
-
-Edit `.env` and add your bot token:
-
-```
-DISCORD_BOT_TOKEN=your-bot-token-here
-```
-
-#### 3. Run
-
+2. Add `DISCORD_BOT_TOKEN=your-token` to `.env`
+3. Run:
 ```bash
-# Development (human-readable logs)
-npm run dev
-
-# Production (JSON logs)
-npm run build && npm start
+npm run dev    # development (human-readable logs)
+npm start      # production (JSON logs)
 ```
 
-#### 4. Use
+## Usage Examples
 
-@mention the bot in Discord:
-
+### Standard mode (Claude workers, council review)
 ```
-@bot Review the code quality of /Users/adam/projects/my-api. Focus on error handling.
-@bot Add rate limiting to /Users/adam/projects/my-api using TypeScript and Express.
-@bot Fix the authentication bug in /Users/adam/projects/my-app. The login endpoint returns 500.
+You: Add rate limiting to /Users/adam/projects/api using Express and TypeScript.
 ```
 
-## Configuration
+### Council mode (3 models implement, best picked, then reviewed)
+```
+You: Add authentication to /Users/adam/projects/api. Use council mode — this is security-critical.
+```
 
-All settings have sensible defaults derived from your hardware. Override in `.env`:
+### Multimodal (Gemini analyzes images/audio/PDFs)
+```
+You: Look at the screenshot at /Users/adam/Desktop/bug.png and fix the UI issue in /Users/adam/projects/frontend.
+You: Read the spec PDF at /Users/adam/docs/api-spec.pdf and implement the endpoints in /Users/adam/projects/api.
+```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DISCORD_BOT_TOKEN` | _(none)_ | Required for Discord mode only |
-| `MAX_CONCURRENT_WORKERS` | 50% of CPU cores | Max parallel worker agents |
-| `MEMORY_CEILING_PCT` | 85% (macOS) / 80% (Linux) | Refuse new work above this % of RAM |
-| `WORKSPACE_DIR` | `~/dev/swarm-workspace` | Where git worktrees are created |
-| `REVIEW_QUALITY_THRESHOLD` | 8 | Score needed to APPROVE (1-10) |
-| `MAX_REVIEW_ITERATIONS` | 3 | Max review-revise cycles |
-| `LOG_LEVEL` | info | Pino log level (debug, info, warn, error) |
-| `CLAUDE_CLI` | claude | Path to Claude CLI binary |
-| `CODEX_CLI` | codex | Path to Codex CLI binary |
+### Review existing code
+```
+You: Review /Users/adam/projects/legacy-app for security issues. Focus on input validation and auth.
+```
 
 ## Architecture
 
 ```
 Terminal / Discord
-        ↓
-   Claude CLI (persistent sessions via --resume)
-        ↓
-   MCP Tools (spawn_workers, spawn_review, etc.)
-        ↓
-   Internal HTTP API
-        ↓
-   Job Manager
-    ↙        ↘
-Workers       Reviewer
-(Claude CLI)  (Codex CLI)
-in worktrees  in worktree
+        │
+   Claude CLI (CTO — persistent session via --resume)
+        │
+   MCP Tools ──────────────────────────────────┐
+        │                                       │
+   spawn_workers ── single model per subtask    │
+   spawn_council ── 3 models per subtask        │
+   spawn_review ─── council review (3 models)   │
+        │                                       │
+   Internal HTTP API                            │
+        │                                       │
+   Job Manager                                  │
+    ┌───┼───┐                                   │
+ Claude Codex Gemini ← workers in worktrees     │
+    └───┼───┘                                   │
+   Worktree Manager ← isolated git worktrees    │
+   Standards Loader ← language-specific rules   │
+   Control Plane ── self-modification safety ───┘
 ```
 
-- **Adapter** — thin transport (Discord or terminal). No business logic.
-- **MCP Server** — gives Claude tools to spawn workers, reviews, check resources.
-- **Job Manager** — owns worker/reviewer lifecycle, cleanup, eviction.
-- **Worktree Manager** — isolated git worktrees per worker, serialized creation, retry cleanup.
-- **Standards Loader** — detects language from tech stack, injects coding standards + project conventions.
-- **Control Plane** — self-modification guardrails when agents target this repo.
+| Module | Purpose |
+|--------|---------|
+| **Adapter** | Transport (Discord or terminal). No business logic. |
+| **MCP Server** | Gives Claude tools: spawn_workers, spawn_council, spawn_review, etc. |
+| **Job Manager** | Worker/reviewer lifecycle, cleanup, eviction, hard cap (1000 jobs). |
+| **Worktree Manager** | Isolated git worktrees per worker, serialized creation, retry cleanup. |
+| **Standards Loader** | Detects language from tech stack, injects coding standards + project conventions. |
+| **Council Reviewer** | 3-stage review: parallel → anonymized ranking → CTO synthesis. |
+| **Council Worker** | Multi-model implementation: fan out → judge → pick best. |
+| **Control Plane** | Self-modification guardrails (4-layer defense). |
 
-## Safety
+## Model Strengths
 
-When agents target dev-swarm's own codebase, four layers of protection activate:
+| Model | Best At | Used For |
+|-------|---------|----------|
+| **Claude** | Architecture, refactoring, reasoning, TypeScript/Python/Go | Workers (primary), CTO, review council |
+| **Codex** | Bug detection, logical errors, code analysis | Review council, council workers |
+| **Gemini** | **Images**, **audio**, **PDFs**, broad language support | Review council, council workers, multimodal |
 
-1. **Deterministic path validation** — blocks auto-merge of control plane files
-2. **Self-repo detection** — fingerprints the target repo
-3. **Prompt restrictions** — workers warned about protected paths
-4. **CODEOWNERS** — requires human review for all infrastructure paths
+Gemini can natively analyze: PNG, JPG, GIF, WEBP, SVG, BMP, MP3, WAV, AIFF, AAC, OGG, FLAC, and PDF files.
 
 ## Coding Standards
 
-Workers automatically receive coding standards based on the `tech_stack` parameter:
+Workers receive language-specific standards automatically based on the tech stack. 10 languages covered: TypeScript, Python, Go, Rust, Java, C#, C, C++, Swift, Ruby.
 
-| Language | Standards file |
-|----------|---------------|
-| TypeScript / JavaScript / React / Node.js | `prompts/standards/typescript.md` |
-| Python / Django / Flask / FastAPI | `prompts/standards/python.md` |
-| Go | `prompts/standards/go.md` |
-| Rust | `prompts/standards/rust.md` |
-| Java / Spring / Kotlin | `prompts/standards/java.md` |
-| C# / .NET | `prompts/standards/csharp.md` |
-| C | `prompts/standards/c.md` |
-| C++ / CMake / Qt | `prompts/standards/cpp.md` |
-| Swift / SwiftUI / iOS | `prompts/standards/swift.md` |
-| Ruby / Rails | `prompts/standards/ruby.md` |
+**Project conventions always win.** If the target repo has `CONTRIBUTING.md`, `.eslintrc`, `pyproject.toml`, etc., those override our generic standards.
 
-**Project conventions override generic standards.** If the target repo has a `CONTRIBUTING.md`, `.eslintrc`, `pyproject.toml`, or other convention files, those are loaded first and take priority.
+See [SKILL.md](SKILL.md) for the full standards matrix and review checklist.
+
+## Configuration
+
+All defaults auto-detect from your hardware. Override in `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCORD_BOT_TOKEN` | _(none)_ | Required for Discord mode only |
+| `MAX_CONCURRENT_WORKERS` | 50% of CPU cores | Max parallel workers |
+| `MEMORY_CEILING_PCT` | 85% (macOS) / 80% (Linux/Windows) | Refuse work above this |
+| `WORKSPACE_DIR` | `~/dev/swarm-workspace` | Where worktrees live |
+| `REVIEW_QUALITY_THRESHOLD` | 8 | Score to APPROVE (1-10) |
+| `LOG_LEVEL` | info | debug, info, warn, error |
+| `CLAUDE_CLI` / `CODEX_CLI` / `GEMINI_CLI` | claude / codex / gemini | CLI paths |
 
 ## Scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm run cli` | **Terminal mode** — interactive REPL, no Discord |
-| `npm run dev` | Discord mode with human-readable pino-pretty logs |
-| `npm start` | Discord mode, production (JSON logs) |
+| `npm run cli` | **Terminal mode** — private, no Discord |
+| `npm run dev` | Discord mode, human-readable logs |
+| `npm start` | Discord mode, production JSON logs |
 | `npm run build` | Compile TypeScript |
-| `npm run typecheck` | Type check without emitting |
-| `npm test` | Run tests (vitest) |
+| `npm test` | Run 155 tests |
+| `npm run typecheck` | Type check |
 | `npm run lint` | Lint with oxlint |
 
-## Stopping the Bot
+## Stopping
 
-- **Ctrl+C** — graceful shutdown (finishes in-flight work, cleans worktrees)
+- **Ctrl+C** — graceful shutdown (finishes work, cleans worktrees)
 - **Ctrl+C twice** — immediate kill
-- From another terminal: `pkill -f "node dist/index.js"` and `rm -rf ~/dev/swarm-workspace/worker-*`
+- From another terminal: `pkill -f "node dist/index.js"`
 
-## Tests
+## Safety
 
-```bash
-npm test
-```
-
-155 tests covering: input validation, control plane safety, resource management, channel serialization, CLI JSON parsing, HTTP API integration, and env configuration.
+When agents target this repo's own codebase, four protection layers activate: deterministic path validation, self-repo fingerprinting, prompt restrictions, and CODEOWNERS review requirements. See [SKILL.md](SKILL.md) for details.
 
 ## License
 

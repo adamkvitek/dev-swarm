@@ -73,6 +73,26 @@ server.tool(
   },
 );
 
+// --- spawn_council ---
+server.tool(
+  "spawn_council",
+  TOOL_DEFINITIONS.spawn_council.description,
+  TOOL_DEFINITIONS.spawn_council.inputSchema,
+  async (args) => {
+    const data = await apiCall("POST", "/jobs/council", {
+      channelId: args.channel_id,
+      subtasks: args.subtasks,
+      techStack: args.tech_stack,
+      repoPath: args.repo_path,
+      previousFeedback: args.previous_feedback,
+    });
+
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(data) }],
+    };
+  },
+);
+
 // --- spawn_review ---
 server.tool(
   "spawn_review",

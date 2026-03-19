@@ -136,6 +136,42 @@ export class HttpApi {
         return sendJson(res, 201, { job_id: result.id, status: result.status });
       }
 
+      // POST /jobs/council
+      if (method === "POST" && path === "/jobs/council") {
+        const body = await readBody(req);
+
+        const channelId = body.channelId;
+        if (typeof channelId !== "string" || channelId.length === 0) {
+          return sendJson(res, 400, { error: "channelId is required" });
+        }
+
+        if (!this.checkRateLimit(channelId)) {
+          return sendJson(res, 429, {
+            error: `Rate limited: max ${RATE_LIMIT_MAX_JOBS} job creations per minute per channel`,
+          });
+        }
+
+        const repoPath = validateRepoPath(body.repoPath);
+        const subtasks = validateSubtasks(body.subtasks);
+        const techStack = validateTechStack(body.techStack);
+        const previousFeedback = body.previousFeedback != null
+          ? validateSafeText(body.previousFeedback, "previousFeedback", 10_000)
+          : undefined;
+
+        const result = this.jobManager.createCouncilJob(
+          channelId,
+          subtasks,
+          techStack,
+          repoPath,
+          previousFeedback,
+        );
+
+        if ("error" in result) {
+          return sendJson(res, 429, result);
+        }
+        return sendJson(res, 201, { job_id: result.id, status: result.status, mode: "council" });
+      }
+
       // POST /jobs/review
       if (method === "POST" && path === "/jobs/review") {
         const body = await readBody(req);
