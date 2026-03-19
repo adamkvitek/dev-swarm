@@ -176,15 +176,16 @@ export class WorkerAgent {
     console.log(`[WORKERS] Dispatching ${subtasks.length} workers (max ${maxConcurrent} concurrent)`);
 
     // Create all worktrees sequentially (avoids git lock conflicts)
-    const worktreeInfos: WorktreeInfo[] = [];
+    // Use Map keyed by subtask ID — avoids fragile array index coupling
+    const worktreeMap = new Map<string, WorktreeInfo>();
+    const jobId = subtasks[0].id.split("-")[0] || subtasks[0].id;
     for (const subtask of subtasks) {
       const info = await context.worktreeManager.create(
         context.repoPath,
-        // Use a shared job ID derived from the first subtask's parent
-        subtasks[0].id.split("-")[0] || subtasks[0].id,
+        jobId,
         subtask.id,
       );
-      worktreeInfos.push(info);
+      worktreeMap.set(subtask.id, info);
     }
 
     // Dispatch workers in parallel
@@ -192,11 +193,12 @@ export class WorkerAgent {
     let doneCount = 0;
 
     const results = await Promise.all(
-      subtasks.map((subtask, i) =>
+      subtasks.map((subtask) =>
         limit(async () => {
+          const worktreeInfo = worktreeMap.get(subtask.id)!;
           const result = await this.execute(subtask, {
             techStack: context.techStack,
-            worktreeInfo: worktreeInfos[i],
+            worktreeInfo,
             previousFeedback: context.previousFeedback,
             signal: context.signal,
           });

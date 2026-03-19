@@ -254,6 +254,13 @@ export class WorktreeManager {
   }
 
   private async doRemove(info: WorktreeInfo): Promise<void> {
+    await retryWithBackoff(
+      () => this.doRemoveOnce(info),
+      `worktree ${info.path}`,
+    );
+  }
+
+  private async doRemoveOnce(info: WorktreeInfo): Promise<void> {
     // Remove the worktree
     const removeResult = await runCli(
       "git",
@@ -303,4 +310,27 @@ function worktreeKey(jobId: string, subtaskId: string): string {
  */
 function sanitizeBranchSegment(segment: string): string {
   return segment.replace(/[^a-zA-Z0-9\-_.]/g, "").slice(0, 50) || "unknown";
+}
+
+const RETRY_DELAYS_MS = [10_000, 30_000, 120_000]; // 10s, 30s, 2min
+
+/**
+ * Retry an async operation with exponential backoff.
+ * Used for worktree cleanup — disk busy / git lock failures are transient.
+ */
+async function retryWithBackoff(fn: () => Promise<void>, label: string): Promise<void> {
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      await fn();
+      return;
+    } catch (err) {
+      if (attempt === RETRY_DELAYS_MS.length) {
+        console.error(`[worktree] Cleanup failed after ${attempt + 1} attempts for ${label}:`, err);
+        return; // Give up — don't crash the process over cleanup
+      }
+      const delay = RETRY_DELAYS_MS[attempt];
+      console.warn(`[worktree] Cleanup attempt ${attempt + 1} failed for ${label}, retrying in ${delay / 1000}s`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
 }

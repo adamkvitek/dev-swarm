@@ -19,10 +19,14 @@ const MAX_BODY_BYTES = 1_048_576; // 1MB
  * Requires a bearer token on every request (generated at startup,
  * passed to MCP server via DEV_SWARM_API_TOKEN env var).
  */
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const RATE_LIMIT_MAX_JOBS = 5; // max 5 job creations per channel per minute
+
 export class HttpApi {
   private server: Server;
   private jobManager: JobManager;
   private resourceGuard: ResourceGuard;
+  private rateLimits = new Map<string, number[]>();
   readonly token: string;
 
   constructor(jobManager: JobManager, resourceGuard: ResourceGuard) {
@@ -53,6 +57,21 @@ export class HttpApi {
         resolve();
       });
     });
+  }
+
+  /**
+   * Per-channel rate limiting. Returns true if the request is allowed.
+   */
+  private checkRateLimit(channelId: string): boolean {
+    const now = Date.now();
+    const timestamps = this.rateLimits.get(channelId) ?? [];
+    const recent = timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+    if (recent.length >= RATE_LIMIT_MAX_JOBS) {
+      return false;
+    }
+    recent.push(now);
+    this.rateLimits.set(channelId, recent);
+    return true;
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -86,6 +105,13 @@ export class HttpApi {
         const channelId = body.channelId;
         if (typeof channelId !== "string" || channelId.length === 0) {
           return sendJson(res, 400, { error: "channelId is required" });
+        }
+
+        // Rate limiting per channel
+        if (!this.checkRateLimit(channelId)) {
+          return sendJson(res, 429, {
+            error: `Rate limited: max ${RATE_LIMIT_MAX_JOBS} job creations per minute per channel`,
+          });
         }
 
         const repoPath = validateRepoPath(body.repoPath);
