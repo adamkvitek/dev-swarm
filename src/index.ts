@@ -42,12 +42,32 @@ async function main(): Promise<void> {
   // 7. Wire job completion notifications -> adapter -> Claude -> Discord
   jobManager.setOnJobComplete((job) => adapter.handleJobCompletion(job));
 
+  let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
-    console.log(`\n${signal} received — shutting down...`);
+    if (shuttingDown) return; // Prevent double-shutdown from rapid Ctrl+C
+    shuttingDown = true;
+
+    console.log(`\n${signal} received — graceful shutdown starting...`);
+
+    // 1. Stop accepting new messages
     await adapter.stop();
+    console.log("[shutdown] Discord adapter stopped");
+
+    // 2. Cancel running jobs (sends SIGTERM to workers)
+    jobManager.cancelAllJobs();
+    console.log("[shutdown] Running jobs cancelled");
+
+    // 3. Stop HTTP API (no more MCP tool calls)
     await httpApi.stop();
+    console.log("[shutdown] HTTP API stopped");
+
+    // 4. Clean up worktrees (with retry — may take a moment)
     await worktreeManager.removeAll();
+    console.log("[shutdown] Worktrees cleaned up");
+
+    // 5. Final cleanup
     jobManager.destroy();
+    console.log("[shutdown] Shutdown complete");
     process.exit(0);
   };
 
