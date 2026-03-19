@@ -59,7 +59,7 @@ export class WorkerAgent {
     const prompt = promptParts.join("\n");
 
     // Build system prompt with code standards + optional self-repo guardrails
-    const standards = await buildWorkerStandards(context.techStack);
+    const standards = await buildWorkerStandards(context.techStack, context.worktreeInfo.repoPath);
     let systemPrompt = WORKER_SYSTEM_PROMPT;
     if (standards) systemPrompt += "\n\n" + standards;
     if (context.worktreeInfo.isSelfRepo) systemPrompt += "\n" + SELF_REPO_WORKER_ADDENDUM;

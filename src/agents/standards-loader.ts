@@ -46,6 +46,13 @@ const LANGUAGE_MAP: Record<string, string> = {
   ruby: "ruby",
   rails: "ruby",
   "ruby on rails": "ruby",
+  c: "c",
+  "c++": "cpp",
+  cpp: "cpp",
+  "c/c++": "cpp",
+  cmake: "cpp",
+  qt: "cpp",
+  embedded: "c",
 };
 
 /** Cache loaded files to avoid repeated disk reads */
@@ -113,16 +120,100 @@ export async function loadLanguageStandards(techStack: string[]): Promise<string
 }
 
 /**
- * Build the full standards prompt for a worker agent.
- * Combines universal rules + language-specific rules based on tech stack.
+ * Well-known project convention files.
+ * If found in the target repo, their content is injected into the worker prompt
+ * so the agent follows the project's own standards (which take priority over ours).
  */
-export async function buildWorkerStandards(techStack: string[]): Promise<string> {
-  const [universal, language] = await Promise.all([
+const PROJECT_CONVENTION_FILES = [
+  "CONTRIBUTING.md",
+  "CLAUDE.md",
+  ".editorconfig",
+  ".eslintrc.json",
+  ".eslintrc.js",
+  ".eslintrc.yml",
+  "eslint.config.js",
+  "eslint.config.mjs",
+  ".prettierrc",
+  ".prettierrc.json",
+  "biome.json",
+  "pyproject.toml",       // Python: ruff/black/mypy config
+  ".golangci.yml",        // Go: linter config
+  "rustfmt.toml",         // Rust: format config
+  "clippy.toml",          // Rust: lint config
+  ".rubocop.yml",         // Ruby: linter config
+  ".swiftlint.yml",       // Swift: linter config
+  "STYLE_GUIDE.md",
+  "CODE_STYLE.md",
+  "docs/CONTRIBUTING.md",
+];
+
+/**
+ * Scan the target repository for existing project conventions.
+ * Returns a summary of what was found so the worker can follow existing patterns.
+ */
+export async function loadProjectConventions(repoPath: string): Promise<string> {
+  const found: Array<{ file: string; content: string }> = [];
+
+  for (const file of PROJECT_CONVENTION_FILES) {
+    const content = await loadFile(resolve(repoPath, file));
+    if (content) {
+      // Truncate large files — we just need the gist, not the full eslint config
+      const truncated = content.length > 2000
+        ? content.slice(0, 2000) + "\n... (truncated)"
+        : content;
+      found.push({ file, content: truncated });
+    }
+  }
+
+  if (found.length === 0) return "";
+
+  log.worker.info(
+    { files: found.map((f) => f.file) },
+    "Found project convention files",
+  );
+
+  const parts = [
+    "# Project-Specific Conventions (HIGHEST PRIORITY)",
+    "",
+    "The following files were found in the target repository.",
+    "**Follow these conventions over any generic rules.** The project's own standards always win.",
+    "",
+  ];
+
+  for (const { file, content } of found) {
+    parts.push(`## ${file}`);
+    parts.push("```");
+    parts.push(content);
+    parts.push("```");
+    parts.push("");
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Build the full standards prompt for a worker agent.
+ * Priority order: project conventions > language-specific > universal.
+ * Project's own standards always override generic rules.
+ */
+export async function buildWorkerStandards(
+  techStack: string[],
+  repoPath?: string,
+): Promise<string> {
+  const [universal, language, project] = await Promise.all([
     loadUniversalStandards(),
     loadLanguageStandards(techStack),
+    repoPath ? loadProjectConventions(repoPath) : Promise.resolve(""),
   ]);
 
-  const parts = [universal];
+  const parts: string[] = [];
+
+  // Project conventions first — they have highest priority
+  if (project) parts.push(project);
+
+  // Then our standards as baseline
+  if (universal) parts.push(universal);
   if (language) parts.push(language);
+
   return parts.join("\n\n---\n\n");
 }
