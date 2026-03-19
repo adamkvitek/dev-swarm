@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { WorkerAgent, WorkerResult } from "../agents/worker.js";
 import type { ReviewerAgent, ReviewResult } from "../agents/reviewer.js";
 import type { CouncilReviewer } from "../agents/council-reviewer.js";
+import type { CouncilWorkerAgent } from "../agents/council-worker.js";
 import type { Subtask } from "../agents/cto.js";
 import type { Env } from "../config/env.js";
 import type { WorktreeManager, MergeResult } from "../workspace/worktree-manager.js";
@@ -54,6 +55,7 @@ export class JobManager {
   private workerAgent: WorkerAgent;
   private reviewerAgent: ReviewerAgent;
   private councilReviewer: CouncilReviewer | null;
+  private councilWorker: CouncilWorkerAgent | null;
   private worktreeManager: WorktreeManager;
   private env: Env;
   private onJobComplete: JobCompleteCallback | null = null;
@@ -64,11 +66,13 @@ export class JobManager {
     reviewerAgent: ReviewerAgent,
     worktreeManager: WorktreeManager,
     councilReviewer?: CouncilReviewer,
+    councilWorker?: CouncilWorkerAgent,
   ) {
     this.env = env;
     this.workerAgent = workerAgent;
     this.reviewerAgent = reviewerAgent;
     this.councilReviewer = councilReviewer ?? null;
+    this.councilWorker = councilWorker ?? null;
     this.worktreeManager = worktreeManager;
 
     // Evict completed/failed jobs older than 1 hour
@@ -134,6 +138,53 @@ export class JobManager {
       }),
       (results) => { job.workerResults = results; },
       `Worker job ${job.id} completed (${subtasks.length} subtasks)`,
+    );
+
+    return job;
+  }
+
+  createCouncilJob(
+    channelId: string,
+    subtasks: Subtask[],
+    techStack: string[],
+    repoPath: string,
+    previousFeedback?: string,
+  ): Job | { error: string } {
+    if (!this.councilWorker) {
+      return { error: "Council worker not configured" };
+    }
+
+    // Council uses 3x resources per subtask (3 models)
+    const activeCount = this.getActiveWorkerCount();
+    const needed = subtasks.length * 3;
+    if (activeCount + needed > this.env.MAX_CONCURRENT_WORKERS * 3) {
+      return {
+        error: `Cannot spawn council: needs ${needed} worker slots (${subtasks.length} subtasks × 3 models), ${activeCount} already active. Wait for current jobs to finish.`,
+      };
+    }
+
+    const job: WorkerJob = {
+      id: randomUUID(),
+      channelId,
+      type: "workers",
+      status: "running",
+      createdAt: Date.now(),
+      subtasks,
+      repoPath,
+    };
+    this.storeJob(job);
+
+    void this.runJob(
+      job,
+      () => this.councilWorker!.executeParallel(job.subtasks, {
+        techStack,
+        repoPath: job.repoPath!,
+        worktreeManager: this.worktreeManager,
+        previousFeedback,
+        signal: this.abortControllers.get(job.id)!.signal,
+      }),
+      (results) => { job.workerResults = results; },
+      `Council job ${job.id} completed (${subtasks.length} subtasks × 3 models)`,
     );
 
     return job;

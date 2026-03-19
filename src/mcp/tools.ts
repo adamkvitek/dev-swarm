@@ -32,9 +32,33 @@ export const TOOL_DEFINITIONS = {
     },
   },
 
+  spawn_council: {
+    description:
+      "Spawn a COUNCIL of workers — multiple AI models (Claude + Gemini) implement each subtask independently in parallel. Use for critical tasks where you want multiple perspectives. Costs ~2-3x more than spawn_workers. Returns a job_id.",
+    inputSchema: {
+      channel_id: z.string().describe("Discord channel ID for this job"),
+      subtasks: z
+        .array(
+          z.object({
+            id: z.string(),
+            title: z.string(),
+            description: z.string(),
+            dependencies: z.array(z.string()),
+          }),
+        )
+        .describe("Subtasks — each will get implementations from multiple models"),
+      tech_stack: z.array(z.string()).describe("Technologies to use"),
+      repo_path: z.string().describe("Absolute path to the target git repository"),
+      previous_feedback: z
+        .string()
+        .optional()
+        .describe("Reviewer feedback from a prior iteration, if any"),
+    },
+  },
+
   spawn_review: {
     description:
-      "Spawn a code review of completed worker output. Uses a different AI model (Codex/o3) for cross-model review. Returns a job_id.",
+      "Spawn a code review using the LLM Council (Claude + Codex + Gemini review anonymously, cross-rank, and synthesize verdict). Returns a job_id.",
     inputSchema: {
       channel_id: z.string().describe("Discord channel ID for this job"),
       worker_job_id: z.string().describe("ID of the completed worker job to review"),

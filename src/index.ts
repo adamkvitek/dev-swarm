@@ -7,6 +7,7 @@ import { generateMcpConfig } from "./adapter/mcp-config.js";
 import { WorkerAgent } from "./agents/worker.js";
 import { ReviewerAgent } from "./agents/reviewer.js";
 import { CouncilReviewer } from "./agents/council-reviewer.js";
+import { CouncilWorkerAgent } from "./agents/council-worker.js";
 import { WorktreeManager } from "./workspace/worktree-manager.js";
 import { logger, log } from "./logger.js";
 
@@ -22,7 +23,8 @@ async function main(): Promise<void> {
   const workerAgent = new WorkerAgent(env);
   const reviewerAgent = new ReviewerAgent(env);
   const councilReviewer = new CouncilReviewer(env);
-  const jobManager = new JobManager(env, workerAgent, reviewerAgent, worktreeManager, councilReviewer);
+  const councilWorker = new CouncilWorkerAgent(env);
+  const jobManager = new JobManager(env, workerAgent, reviewerAgent, worktreeManager, councilReviewer, councilWorker);
 
   // 3. Resource guard — memory + worker capacity checks
   const resources = new ResourceGuard(
