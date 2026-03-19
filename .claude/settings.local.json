@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "WebSearch",
+      "WebFetch",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(tsx:*)",
+      "Bash(cd:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)",
+      "Bash(ps:*)",
+      "Bash(top:*)",
+      "Bash(sysctl:*)",
+      "Bash(vm_stat)",
+      "Bash(python3:*)",
+      "Bash(claude:*)",
+      "Bash(codex:*)",
+      "Bash(gemini:*)",
+      "Bash(timeout:*)",
+      "Bash(pkill:*)",
+      "Bash(kill:*)",
+      "Bash(sed:*)",
+      "mcp__dev-swarm__*"
+    ]
+  }
+}
