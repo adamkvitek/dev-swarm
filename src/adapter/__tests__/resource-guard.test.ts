@@ -5,6 +5,12 @@ import { ResourceGuard } from "../resource-guard.js";
 vi.mock("node:os", () => ({
   freemem: vi.fn(() => 8 * 1024 * 1024 * 1024), // 8GB free
   totalmem: vi.fn(() => 16 * 1024 * 1024 * 1024), // 16GB total
+  platform: vi.fn(() => "darwin"), // macOS by default in tests
+}));
+
+// Mock fs to prevent /proc/meminfo read on non-Linux
+vi.mock("node:fs", () => ({
+  readFileSync: vi.fn(() => { throw new Error("not linux"); }),
 }));
 
 describe("ResourceGuard", () => {
@@ -16,6 +22,8 @@ describe("ResourceGuard", () => {
       expect(snap.healthy).toBe(true);
       expect(snap.memoryUsedPct).toBe(50);
       expect(snap.memoryTotalMb).toBeGreaterThan(0);
+      expect(snap.memoryAvailableMb).toBeGreaterThan(0);
+      expect(snap.platform).toBe("darwin");
     });
 
     it("should return unhealthy when memory exceeds ceiling", () => {
@@ -64,10 +72,11 @@ describe("ResourceGuard", () => {
   });
 
   describe("statusLine()", () => {
-    it("should return a readable status string", () => {
+    it("should return a readable status string with available memory", () => {
       const guard = new ResourceGuard(80, 4, () => 2);
       const line = guard.statusLine();
       expect(line).toContain("Memory:");
+      expect(line).toContain("available");
       expect(line).toContain("Workers: 2/4");
     });
 
