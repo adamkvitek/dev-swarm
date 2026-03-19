@@ -101,16 +101,65 @@ async function main(): Promise<void> {
   console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   console.log("  Dev Swarm — Terminal Mode");
   console.log(`  ${resources.statusLine()}`);
-  console.log("  Type your request. Ctrl+C to exit.");
+  console.log("  Type your request (multi-line: end with empty line).");
+  console.log("  Ctrl+C to exit.");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-  const ask = (): void => {
-    rl.question("You: ", async (input) => {
+  /**
+   * Read multi-line input. Collects lines until the user sends an empty line.
+   * Single-line inputs are sent immediately (for quick prompts).
+   */
+  const readInput = (): Promise<string> => {
+    return new Promise((resolve) => {
+      const lines: string[] = [];
+      let firstLine = true;
+
+      const onLine = (line: string): void => {
+        if (firstLine) {
+          firstLine = false;
+          // If this is the only line and there's a pause, treat as single-line
+          lines.push(line);
+
+          // Give a short window for more pasted lines to arrive
+          const timer = setTimeout(() => {
+            // No more lines came — check if input looks complete
+            if (lines.length === 1 && lines[0].trim()) {
+              rl.removeListener("line", onLine);
+              resolve(lines.join("\n"));
+            }
+          }, 100);
+
+          // If another line arrives quickly, cancel the single-line timer
+          rl.once("line", (nextLine) => {
+            clearTimeout(timer);
+            rl.removeListener("line", onLine);
+
+            // Continue collecting lines until empty line
+            lines.push(nextLine);
+            const collectMore = (l: string): void => {
+              if (l.trim() === "") {
+                rl.removeListener("line", collectMore);
+                resolve(lines.join("\n"));
+              } else {
+                lines.push(l);
+              }
+            };
+            rl.on("line", collectMore);
+          });
+          return;
+        }
+      };
+
+      process.stdout.write("You: ");
+      rl.once("line", onLine);
+    });
+  };
+
+  const ask = async (): Promise<void> => {
+    while (true) {
+      const input = await readInput();
       const trimmed = input.trim();
-      if (!trimmed) {
-        ask();
-        return;
-      }
+      if (!trimmed) continue;
 
       try {
         const result = await session.send(trimmed, {
@@ -124,12 +173,10 @@ async function main(): Promise<void> {
           console.log("(Request timed out. Try breaking it into smaller tasks.)\n");
         }
       }
-
-      ask();
-    });
+    }
   };
 
-  ask();
+  void ask();
 
   // Graceful shutdown
   const shutdown = async (): Promise<void> => {
