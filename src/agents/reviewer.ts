@@ -1,5 +1,6 @@
 import { runCli } from "./cli-runner.js";
 import { reviewerResponseSchema, parseCliJson } from "./schemas.js";
+import { loadReviewChecklist } from "./standards-loader.js";
 import { log } from "../logger.js";
 import type { Env } from "../config/env.js";
 import type { WorkerResult } from "./worker.js";
@@ -80,15 +81,19 @@ export class ReviewerAgent {
       )
       .join("\n\n---\n\n");
 
+    // Load review checklist for structured evaluation
+    const checklist = await loadReviewChecklist();
+
     const fullPrompt = [
       `## Task Description\n${taskDescription}`,
       `## Quality Threshold\nAverage score must be >= ${this.qualityThreshold} to APPROVE.`,
       `## Iteration\n${iteration} of max review cycles.`,
+      checklist ? `## Review Checklist\n${checklist}` : "",
       `## Changes to Review\n${codeForReview}`,
       "",
-      "Review the changes. Read the actual files for full context. Run tests if possible.",
+      "Review the changes against the checklist above. Read the actual files for full context. Run tests if possible.",
       "Respond with the JSON object only.",
-    ].join("\n\n");
+    ].filter(Boolean).join("\n\n");
 
     log.reviewer.info({ iteration }, "Starting review");
 
