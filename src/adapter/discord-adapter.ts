@@ -7,7 +7,7 @@ import {
 } from "discord.js";
 import { readFile } from "node:fs/promises";
 import pLimit from "p-limit";
-import { ClaudeSession } from "../agents/claude-session.js";
+import { SessionManager, DiscordStreamHandler } from "../streaming/index.js";
 import { ChannelMutex } from "./channel-mutex.js";
 import { ResourceGuard } from "./resource-guard.js";
 import { detectedHardware } from "../config/env.js";
@@ -27,7 +27,7 @@ const MAX_CONCURRENT_SESSIONS = 5;
 export class DiscordAdapter {
   private client: Client;
   private env: Env;
-  private sessions = new Map<string, ClaudeSession>();
+  private sessionManager: SessionManager;
   private mutex = new ChannelMutex();
   private resources: ResourceGuard;
   private jobManager: JobManager;
@@ -40,6 +40,10 @@ export class DiscordAdapter {
     this.env = env;
     this.jobManager = jobManager;
     this.resources = resources;
+    this.sessionManager = new SessionManager({
+      claudeCli: env.CLAUDE_CLI,
+      extraArgs: ["--dangerously-skip-permissions"],
+    });
 
     this.client = new Client({
       intents: [
@@ -72,136 +76,108 @@ export class DiscordAdapter {
       this.systemPrompt = null;
     }
 
+    this.sessionManager.updateSystemPrompt(this.buildSystemPrompt());
     await this.client.login(this.env.DISCORD_BOT_TOKEN);
   }
 
   async stop(): Promise<void> {
     log.adapter.info("Shutting down...");
+    this.sessionManager.clear();
     this.client.destroy();
   }
 
   setMcpConfigPath(path: string): void {
     this.mcpConfigPath = path;
-  }
-
-  private getOrCreateSession(channelId: string): ClaudeSession {
-    let session = this.sessions.get(channelId);
-    if (!session) {
-      // Build full system prompt with resource status
-      const sysPrompt = this.buildSystemPrompt();
-      session = new ClaudeSession(
-        this.env.CLAUDE_CLI,
-        ["--dangerously-skip-permissions"],
-        this.mcpConfigPath ?? undefined,
-        sysPrompt,
-      );
-      this.sessions.set(channelId, session);
-    }
-    return session;
+    this.sessionManager.updateMcpConfigPath(path);
   }
 
   private async handleMessage(message: Message): Promise<void> {
-    // Ignore bots (including ourselves)
     if (message.author.bot) return;
-
-    // Only respond to @mentions (for now — Phase 3 can add channel-watching)
     if (!message.mentions.has(this.client.user!)) return;
 
-    // Message age filter — ignore messages older than MAX_MESSAGE_AGE_MS
-    // This prevents the startup flood that caused the runaway agent incident
     const messageAge = Date.now() - message.createdTimestamp;
     if (messageAge > this.env.MAX_MESSAGE_AGE_MS) {
-      log.adapter.info(
-        { ageSeconds: Math.round(messageAge / 1000), author: message.author.tag },
-        "Ignoring old message",
-      );
+      log.adapter.info({ ageSeconds: Math.round(messageAge / 1000) }, "Ignoring old message");
       return;
     }
 
-    // Strip the bot mention from the message content
     const content = message.content
       .replace(`<@${this.client.user!.id}>`, "")
       .replace(/<@&\d+>/g, "")
       .trim();
-
     if (!content) return;
 
     const channel = message.channel as TextChannel;
-
     log.adapter.info(
       { author: message.author.tag, channel: channel.name, preview: content.slice(0, 100) },
       "Incoming message",
     );
 
-    // Resource check — refuse if system is overloaded
     const resourceSnap = this.resources.check();
     if (!resourceSnap.healthy) {
-      log.adapter.warn({ status: this.resources.statusLine() }, "Resource limit hit");
       await channel.send(
-        `I'm currently at ${resourceSnap.memoryUsedPct}% memory usage (limit: ${this.env.MEMORY_CEILING_PCT}%). ` +
-        `I need to wait for running tasks to finish before taking on new work.`
+        `I'm currently at ${resourceSnap.memoryUsedPct}% memory usage. ` +
+        `I need to wait for running tasks to finish.`
       );
       return;
     }
 
-    // Serialize per channel — one message at a time
     const release = await this.mutex.acquire(channel.id);
+    const streamHandler = new DiscordStreamHandler(channel);
 
-    let prompt = "";
     try {
-      // Show typing indicator while Claude thinks
       await channel.sendTyping();
 
-      // First-run announcement — tell the user what hardware was detected
+      // First-run announcement
       if (!this.firstRunAnnounced.has(channel.id)) {
         this.firstRunAnnounced.add(channel.id);
         const hw = detectedHardware;
         await this.sendWithRateLimit(channel,
           `**System initialized** — detected ${hw.cores} CPU cores, ${hw.ramGb}GB RAM. ` +
           `Using ${this.env.MAX_CONCURRENT_WORKERS} parallel workers, ` +
-          `${this.env.MEMORY_CEILING_PCT}% memory ceiling. ` +
-          `Override with env vars: \`MAX_CONCURRENT_WORKERS\`, \`MEMORY_CEILING_PCT\`.`
+          `${this.env.MEMORY_CEILING_PCT}% memory ceiling.`
         );
       }
 
-      const session = this.getOrCreateSession(channel.id);
-
-      // Always send just the user message — system prompt is handled by --append-system-prompt
-      prompt = `[${message.author.displayName}]: ${content}`;
+      const session = this.sessionManager.getOrCreate(channel.id);
+      const prompt = `[${message.author.displayName}]: ${content}`;
 
       const result = await this.sessionLimiter(() =>
         session.send(prompt, {
+          onTextDelta: (text) => streamHandler.appendText(text),
+          onToolUseStart: (name) => streamHandler.showToolUse(name),
+          onToolUseEnd: () => streamHandler.clearToolUse(),
+        }, {
           timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,
         }),
       );
 
+      await streamHandler.finalize();
+
       log.adapter.info(
         { durationMs: result.durationMs, costUsd: result.costUsd, preview: result.text.slice(0, 100) },
-        "Response received",
+        "Streaming response completed",
       );
 
-      // Send response, respecting Discord's 2000 char limit
-      await this.sendChunked(channel, result.text);
+      // If streaming produced no visible content, send the final text as fallback
+      if (!streamHandler.hasContent && result.text) {
+        await this.sendChunked(channel, result.text);
+      }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      log.adapter.error({ err: errMsg }, "Error processing message");
+      log.adapter.error({ err: errMsg }, "Error in streaming message");
+
+      await streamHandler.finalize();
 
       if (errMsg.includes("timed out")) {
-        await this.sendWithRateLimit(channel,
-          "That took too long — the request may be too complex. Try breaking it down."
-        ).catch(() => {});
+        await streamHandler.showError(
+          "That took too long — try breaking it down into smaller requests."
+        );
       } else {
-        // Try to recover the session before resetting
-        const recovered = await this.tryRecoverSession(channel.id, prompt);
-        if (recovered) {
-          await this.sendChunked(channel, recovered);
-        } else {
-          await this.sendWithRateLimit(channel,
-            `Something went wrong. Try again or rephrase your request.`
-          ).catch(() => {});
-          // Reset session only after recovery fails
-          this.sessions.delete(channel.id);
-        }
+        await streamHandler.showError(
+          "Something went wrong. Try again or rephrase your request."
+        );
+        this.sessionManager.reset(channel.id);
       }
     } finally {
       release();
@@ -278,30 +254,9 @@ export class DiscordAdapter {
   }
 
   /**
-   * Attempt to recover a failed session by retrying once.
-   * Returns the response text on success, null on failure.
-   */
-  private async tryRecoverSession(channelId: string, prompt: string): Promise<string | null> {
-    const session = this.sessions.get(channelId);
-    if (!session?.isActive) return null;
-
-    log.adapter.info({ channelId }, "Attempting session recovery");
-    try {
-      const result = await session.send(prompt, {
-        timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,
-      });
-      log.adapter.info({ channelId, durationMs: result.durationMs }, "Session recovered");
-      return result.text;
-    } catch {
-      log.adapter.warn({ channelId }, "Session recovery failed, resetting");
-      return null;
-    }
-  }
-
-  /**
    * Called by JobManager when a job completes.
    * Builds a synthetic system message and sends it to the Claude session
-   * for the relevant channel, then forwards Claude's response to Discord.
+   * for the relevant channel, then streams Claude's response to Discord.
    */
   async handleJobCompletion(job: Job): Promise<void> {
     const channelId = job.channelId;
@@ -344,24 +299,27 @@ export class DiscordAdapter {
     log.adapter.info({ jobId: job.id, channel: channel.name, preview: notification.slice(0, 120) }, "Sending job notification");
 
     const release = await this.mutex.acquire(channelId);
+    const streamHandler = new DiscordStreamHandler(channel);
+
     try {
       await channel.sendTyping();
-      const session = this.getOrCreateSession(channelId);
+      const session = this.sessionManager.getOrCreate(channelId);
       const result = await this.sessionLimiter(() =>
         session.send(notification, {
+          onTextDelta: (text) => streamHandler.appendText(text),
+          onToolUseStart: (name) => streamHandler.showToolUse(name),
+          onToolUseEnd: () => streamHandler.clearToolUse(),
+        }, {
           timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,
         }),
       );
+      await streamHandler.finalize();
 
-      log.adapter.info(
-        { jobId: job.id, durationMs: result.durationMs, preview: result.text.slice(0, 100) },
-        "Job notification response",
-      );
-
-      await this.sendChunked(channel, result.text);
+      if (!streamHandler.hasContent && result.text) {
+        await this.sendChunked(channel, result.text);
+      }
     } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      log.adapter.error({ err: errMsg, jobId: job.id }, "Error sending job notification");
+      await streamHandler.finalize();
       await channel.send(
         `A job finished but I had trouble processing the results. Job ID: ${job.id}`
       ).catch(() => {});
