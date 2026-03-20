@@ -1,4 +1,4 @@
-# dev-swarm
+# Dev Swarm
 
 A multi-model AI development team. You describe what to build, point it at a repository, and it coordinates Claude, Codex, and Gemini to implement, review, and deliver the code.
 
