@@ -10,7 +10,6 @@ import pLimit from "p-limit";
 import { SessionManager, DiscordStreamHandler } from "../streaming/index.js";
 import { ChannelMutex } from "./channel-mutex.js";
 import { ResourceGuard } from "./resource-guard.js";
-import { detectedHardware } from "../config/env.js";
 import { log } from "../logger.js";
 import type { JobManager, Job } from "./job-manager.js";
 import type { Env } from "../config/env.js";
@@ -34,7 +33,7 @@ export class DiscordAdapter {
   private sessionLimiter = pLimit(MAX_CONCURRENT_SESSIONS);
   private mcpConfigPath: string | null = null;
   private systemPrompt: string | null = null;
-  private firstRunAnnounced = new Set<string>(); // channels that got the first-run message
+  private typingTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   constructor(env: Env, jobManager: JobManager, resources: ResourceGuard) {
     this.env = env;
@@ -82,6 +81,8 @@ export class DiscordAdapter {
 
   async stop(): Promise<void> {
     log.adapter.info("Shutting down...");
+    for (const timer of this.typingTimers.values()) clearInterval(timer);
+    this.typingTimers.clear();
     this.sessionManager.clear();
     this.client.destroy();
   }
@@ -126,25 +127,18 @@ export class DiscordAdapter {
     const streamHandler = new DiscordStreamHandler(channel);
 
     try {
-      await channel.sendTyping();
-
-      // First-run announcement
-      if (!this.firstRunAnnounced.has(channel.id)) {
-        this.firstRunAnnounced.add(channel.id);
-        const hw = detectedHardware;
-        await this.sendWithRateLimit(channel,
-          `**System initialized** — detected ${hw.cores} CPU cores, ${hw.ramGb}GB RAM. ` +
-          `Using ${this.env.MAX_CONCURRENT_WORKERS} parallel workers, ` +
-          `${this.env.MEMORY_CEILING_PCT}% memory ceiling.`
-        );
-      }
+      // Keep typing indicator alive until first token arrives
+      this.startTyping(channel);
 
       const session = this.sessionManager.getOrCreate(channel.id);
       const prompt = `[${message.author.displayName}]: ${content}`;
 
       const result = await this.sessionLimiter(() =>
         session.send(prompt, {
-          onTextDelta: (text) => streamHandler.appendText(text),
+          onTextDelta: (text) => {
+            this.stopTyping(channel.id);
+            streamHandler.appendText(text);
+          },
           onToolUseStart: (name) => streamHandler.showToolUse(name),
           onToolUseEnd: () => streamHandler.clearToolUse(),
         }, {
@@ -167,6 +161,7 @@ export class DiscordAdapter {
       const errMsg = error instanceof Error ? error.message : String(error);
       log.adapter.error({ err: errMsg }, "Error in streaming message");
 
+      this.stopTyping(channel.id);
       await streamHandler.finalize();
 
       if (errMsg.includes("timed out")) {
@@ -180,7 +175,29 @@ export class DiscordAdapter {
         this.sessionManager.reset(channel.id);
       }
     } finally {
+      this.stopTyping(channel.id);
       release();
+    }
+  }
+
+  /**
+   * Keep Discord's "typing..." indicator alive by re-sending it every 8s.
+   * Discord's typing indicator expires after ~10s, so 8s keeps it seamless.
+   */
+  private startTyping(channel: TextChannel): void {
+    this.stopTyping(channel.id);
+    channel.sendTyping().catch(() => {});
+    const timer = setInterval(() => {
+      channel.sendTyping().catch(() => {});
+    }, 8_000);
+    this.typingTimers.set(channel.id, timer);
+  }
+
+  private stopTyping(channelId: string): void {
+    const timer = this.typingTimers.get(channelId);
+    if (timer) {
+      clearInterval(timer);
+      this.typingTimers.delete(channelId);
     }
   }
 
@@ -302,11 +319,14 @@ export class DiscordAdapter {
     const streamHandler = new DiscordStreamHandler(channel);
 
     try {
-      await channel.sendTyping();
+      this.startTyping(channel);
       const session = this.sessionManager.getOrCreate(channelId);
       const result = await this.sessionLimiter(() =>
         session.send(notification, {
-          onTextDelta: (text) => streamHandler.appendText(text),
+          onTextDelta: (text) => {
+            this.stopTyping(channelId);
+            streamHandler.appendText(text);
+          },
           onToolUseStart: (name) => streamHandler.showToolUse(name),
           onToolUseEnd: () => streamHandler.clearToolUse(),
         }, {
@@ -319,11 +339,13 @@ export class DiscordAdapter {
         await this.sendChunked(channel, result.text);
       }
     } catch (error) {
+      this.stopTyping(channelId);
       await streamHandler.finalize();
       await channel.send(
         `A job finished but I had trouble processing the results. Job ID: ${job.id}`
       ).catch(() => {});
     } finally {
+      this.stopTyping(channelId);
       release();
     }
   }

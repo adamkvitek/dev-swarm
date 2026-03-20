@@ -231,6 +231,7 @@ export class StreamingClaudeSession {
   private buildArgs(): string[] {
     const args = [
       "--print",
+      "--verbose",
       "--output-format",
       "stream-json",
       ...this.extraArgs,
