@@ -31,3 +31,4 @@ mcp-config.json
 
 #  local data
 ./
+.claude/settings.local.json
