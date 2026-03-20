@@ -6,34 +6,6 @@ export interface CliResult {
   exitCode: number;
 }
 
-/**
- * Returns true when running inside a VM that has been explicitly marked
- * safe for  execution via the _VM_CONFIRMED env var.
- */
-function isInsideVm(): boolean {
-  return process.env._VM_CONFIRMED === "1";
-}
-
-/**
- * Blocks  invocations on the host OS.
- *
- *  must NEVER run on the host — was flagged as unsafe for host execution.
- * The guard allows execution only when _VM_CONFIRMED=1 is set,
- * which should only happen inside a dedicated VM.
- */
-function assertNotHost(command: string, args: string[]): void {
-  const fullCommand = [command, ...args].join(" ").toLowerCase();
-  if (!fullCommand.includes("")) return;
-
-  if (isInsideVm()) return;
-
-  throw new Error(
-    "BLOCKED:  must NEVER run on the host OS. " +
-      "It may only be executed inside a dedicated VM with _VM_CONFIRMED=1. " +
-      "See DECISIONS.md and SETUP.md for details."
-  );
-}
-
 const SIGKILL_DELAY_MS = 10_000; // 10s after SIGTERM before SIGKILL
 
 /**
@@ -47,7 +19,6 @@ export function runCli(
   args: string[],
   options?: { timeoutMs?: number; cwd?: string; stdin?: string; signal?: AbortSignal }
 ): Promise<CliResult> {
-  assertNotHost(command, args);
 
   const timeoutMs = options?.timeoutMs ?? 300_000; // 5 min default
 

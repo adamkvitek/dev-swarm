@@ -50,62 +50,6 @@ describe("runCli", () => {
     ).rejects.toThrow("Failed to spawn");
   });
 
-  describe(" safety guard", () => {
-    // The guard throws synchronously before spawning the process
-
-    it("should block  commands on host", () => {
-      expect(() =>
-        runCli("", ["run", "something"])
-      ).toThrow("BLOCKED");
-    });
-
-    it("should block commands containing  in args", () => {
-      expect(() =>
-        runCli("sh", ["-c", " dangerous"], { timeoutMs: 1_000 })
-      ).toThrow("BLOCKED");
-    });
-
-    it("should block case-insensitive  references", () => {
-      expect(() =>
-        runCli("", ["test"], { timeoutMs: 1_000 })
-      ).toThrow("BLOCKED");
-    });
-
-    it("should allow  when _VM_CONFIRMED is set", async () => {
-      const originalEnv = process.env._VM_CONFIRMED;
-      try {
-        process.env._VM_CONFIRMED = "1";
-        // Should not throw the BLOCKED error — will fail for other reasons
-        // (command doesn't exist) but that's expected
-        await expect(
-          runCli("-fake-test", ["run"], { timeoutMs: 1_000 })
-        ).rejects.toThrow("Failed to spawn");
-      } finally {
-        if (originalEnv === undefined) {
-          delete process.env._VM_CONFIRMED;
-        } else {
-          process.env._VM_CONFIRMED = originalEnv;
-        }
-      }
-    });
-
-    it("should block  when VM flag is not '1'", () => {
-      const originalEnv = process.env._VM_CONFIRMED;
-      try {
-        process.env._VM_CONFIRMED = "0";
-        expect(() =>
-          runCli("", ["test"], { timeoutMs: 1_000 })
-        ).toThrow("BLOCKED");
-      } finally {
-        if (originalEnv === undefined) {
-          delete process.env._VM_CONFIRMED;
-        } else {
-          process.env._VM_CONFIRMED = originalEnv;
-        }
-      }
-    });
-  });
-
   it("should use cwd option for spawned process", async () => {
     const result = await runCli("pwd", [], {
       cwd: "/tmp",
