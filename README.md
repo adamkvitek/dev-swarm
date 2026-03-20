@@ -1,8 +1,8 @@
 # dev-swarm
 
-AI agents that build software together. Give it a task and a repo, and it coordinates Claude, Codex, and Gemini to implement, review, and ship code.
+A multi-model AI development team. You describe what to build, point it at a repository, and it coordinates Claude, Codex, and Gemini to implement, review, and deliver the code.
 
-> This whole thing is vibe-coded. The agents built the code, the tests, the docs, and this README. A human pointed them in the right direction.
+> 100% vibe-coded. The agents wrote the code, the tests, the docs, and this README.
 
 ```
 You: "Add JWT auth to ~/projects/my-app"
@@ -29,50 +29,50 @@ You: "Add JWT auth to ~/projects/my-app"
             |            |            |
             +------------+------------+
                          v
-              Cross-rank → synthesize verdict
+              Cross-rank, synthesize verdict
                          v
-                 APPROVE → feature branch
-                 REVISE  → iterate with feedback
+                 APPROVE -> feature branch
+                 REVISE  -> iterate with feedback
 ```
 
-Two modes: **headless** (Claude Code + MCP tools, everything local) or **Discord** (team collaboration bot).
+Works in two modes: **headless** (Claude Code + MCP tools, fully local) or **Discord** (collaborative bot for teams).
 
 ## Quick start
 
 ```bash
-git clone https://github.com/AKTech-ai/dev-swarm.git
+git clone https://github.com/adamkvitek/dev-swarm.git
 cd dev-swarm
 npm install
 npm run dev-swarm    # launches server + Claude Code with MCP tools
 ```
 
-That's it. Claude opens with full access to the swarm tools. Ask it to build something.
+Claude opens with access to the swarm tools. Ask it to build something.
 
 ## How it works
 
-A **CTO agent** (Claude) receives your request and breaks it into subtasks. **Worker agents** implement each subtask in isolated git worktrees — they read existing code, write files, run tests. A **review council** (Claude + Codex + Gemini) reviews the output anonymously, cross-ranks each other, and synthesizes a verdict.
+A **CTO agent** (Claude) takes your request and breaks it into subtasks. **Worker agents** implement each subtask in isolated git worktrees. They read existing code, write files, and run tests. A **review council** (Claude + Codex + Gemini) reviews the output anonymously, cross-ranks each other, and produces a verdict.
 
-If the review says REVISE, workers get the feedback and iterate. If APPROVE, changes land on a feature branch.
+If the review says REVISE, workers get the feedback and try again. If APPROVE, changes land on a feature branch.
 
-### Key concepts
+### Concepts
 
-- **Workers** — AI agents that write code in isolated git worktrees. Can't conflict with each other.
-- **Council mode** — Multiple models implement the same task, a judge picks the best. Use for critical code. Costs ~3x.
-- **Review council** — Three models review anonymously, cross-rank for thoroughness, CTO synthesizes final verdict.
-- **Standards** — Workers get language-specific coding standards (10 languages) and respect the target repo's conventions (CONTRIBUTING.md, .eslintrc, etc.).
+- **Workers**: AI agents that write code in isolated git worktrees. They can't conflict with each other.
+- **Council mode**: Multiple models implement the same task. A judge picks the best result. Use for critical code. Costs ~3x resources.
+- **Review council**: Three models review anonymously, cross-rank for thoroughness, and the CTO synthesizes the final verdict.
+- **Standards**: Workers receive language-specific coding standards (10 languages supported) and follow the target repo's conventions.
 
-### Two modes
+### Modes
 
-**Headless (recommended)** — Claude Code with MCP tools. Private, everything stays local.
+**Headless (recommended)**: Claude Code with MCP tools. Everything stays local.
 
 ```bash
 npm run dev-swarm
 ```
 
-**Discord** — Team collaboration. Claude is the bot, responds to @mentions.
+**Discord**: Team collaboration. Claude responds to @mentions with live-streaming responses.
 
 ```bash
-# Add DISCORD_BOT_TOKEN to .env first
+# Set DISCORD_BOT_TOKEN in .env first
 npm run dev     # development (pretty logs)
 npm start       # production (JSON logs)
 ```
@@ -87,25 +87,25 @@ npm start       # production (JSON logs)
 | Gemini CLI | `gemini --version` | For council mode |
 | Git | `git --version` | Yes |
 
-Not all CLIs are needed — the system degrades gracefully. Claude is the minimum.
+Not all CLIs are needed. The system works with fewer models available. Claude is the minimum.
 
 ## Configuration
 
-All defaults auto-detect from your hardware. Override in `.env`:
+Defaults are auto-detected from your hardware. Override in `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable | Default | What it does |
-|----------|---------|--------------|
-| `DISCORD_BOT_TOKEN` | — | Required for Discord mode only |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCORD_BOT_TOKEN` | | Required for Discord mode only |
 | `MAX_CONCURRENT_WORKERS` | 75% of CPU cores | Max parallel worker agents |
-| `MEMORY_CEILING_PCT` | 92% (macOS) / 90% (Linux) | Refuse work above this |
-| `REVIEW_QUALITY_THRESHOLD` | 8 | Score (1-10) needed to APPROVE |
-| `WORKSPACE_DIR` | `~/dev/swarm-workspace` | Where git worktrees live |
+| `MEMORY_CEILING_PCT` | 92% (macOS) / 90% (Linux) | Refuse new work above this threshold |
+| `REVIEW_QUALITY_THRESHOLD` | 8 | Score (1-10) needed to approve |
+| `WORKSPACE_DIR` | `~/dev/swarm-workspace` | Where git worktrees are created |
 | `LOG_LEVEL` | info | debug, info, warn, error |
-| `CLAUDE_CLI` / `CODEX_CLI` / `GEMINI_CLI` | claude / codex / gemini | CLI paths |
+| `CLAUDE_CLI` / `CODEX_CLI` / `GEMINI_CLI` | claude / codex / gemini | CLI executable paths |
 
 See [.env.example](.env.example) for all options.
 
@@ -113,7 +113,7 @@ See [.env.example](.env.example) for all options.
 
 ```
 src/
-├── index.ts              # Discord mode entrypoint
+├── index.ts              # Discord mode entry point
 ├── dev-swarm.ts          # Headless mode (server + Claude Code)
 ├── serve.ts              # Headless server only
 ├── logger.ts             # Pino structured logging
@@ -137,14 +137,14 @@ src/
 │   ├── shared.ts           # Shared prompts and utilities
 │   └── standards-loader.ts # Language-specific coding standards
 ├── config/
-│   └── env.ts              # Environment config with Zod validation
+│   └── env.ts              # Environment config (Zod validation)
 ├── mcp/
 │   ├── server.ts           # MCP server (stdio transport)
 │   └── tools.ts            # Tool definitions
 ├── workspace/
 │   ├── worktree-manager.ts # Git worktree lifecycle
 │   └── control-plane.ts    # Self-modification safety
-├── streaming/              # Discord live streaming (NDJSON)
+├── streaming/              # Discord live token streaming (NDJSON)
 └── prompts/
     ├── system.md           # CTO system prompt
     ├── code-standards.md   # Universal coding standards
@@ -156,16 +156,16 @@ src/
 
 When agents target this repo's own codebase, four protection layers activate:
 
-1. **Deterministic path validation** — blocks auto-merge of infrastructure files
-2. **Self-repo fingerprinting** — detects when workers target the bot itself
-3. **Prompt restrictions** — workers get explicit rules about protected paths
-4. **CODEOWNERS** — requires human review for all infrastructure changes
+1. **Deterministic path validation**: blocks auto-merge of infrastructure files
+2. **Self-repo fingerprinting**: detects when workers target the bot itself
+3. **Prompt restrictions**: workers get explicit rules about protected paths
+4. **CODEOWNERS**: requires human review for all infrastructure changes
 
 ## Scripts
 
-| Script | What it does |
+| Script | Description |
 |--------|-------------|
-| `npm run dev-swarm` | Headless mode — server + Claude Code |
+| `npm run dev-swarm` | Headless mode (server + Claude Code) |
 | `npm run dev` | Discord mode, human-readable logs |
 | `npm start` | Discord mode, production JSON logs |
 | `npm run build` | Compile TypeScript |
