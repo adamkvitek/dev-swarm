@@ -12,7 +12,7 @@
 No Discord needed. Private, all data stays local.
 
 ```bash
-git clone https://github.com/yourname/dev-swarm.git
+git clone https://github.com/adamkvitek/dev-swarm.git
 cd dev-swarm
 npm install
 npm run dev-swarm
