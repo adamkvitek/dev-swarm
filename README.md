@@ -2,7 +2,7 @@
 
 A multi-model AI development team. You describe what to build, point it at a repository, and it coordinates Claude, Codex, and Gemini to implement, review, and deliver the code.
 
-Runs entirely on local CLI tools (Claude Code, Codex CLI, Gemini CLI). No API keys, no tokens, no per-request billing. Uses your existing subscriptions.
+Runs entirely on local CLI tools (Claude Code, Codex CLI, Gemini CLI). Uses your existing subscriptions.
 
 > 100% vibe-coded. The agents wrote the code, the tests, the docs, and this README.
 
