@@ -1,8 +1,29 @@
 {
   "name": "dev-swarm",
   "version": "0.1.0",
-  "description": "AI dev team orchestrator — parallel worker agents with cross-model review, isolated worktrees, and enforced coding standards",
+  "description": "AI dev team orchestrator — Claude, Codex, and Gemini build software together with parallel workers, cross-model review, and isolated git worktrees",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AKTech-ai/dev-swarm.git"
+  },
+  "homepage": "https://github.com/AKTech-ai/dev-swarm",
+  "bugs": {
+    "url": "https://github.com/AKTech-ai/dev-swarm/issues"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "claude",
+    "codex",
+    "gemini",
+    "code-review",
+    "mcp",
+    "discord-bot",
+    "orchestrator",
+    "dev-tools"
+  ],
+  "author": "Adam Kvitek",
   "engines": {
     "node": ">=22"
   },
