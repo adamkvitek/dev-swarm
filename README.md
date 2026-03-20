@@ -2,6 +2,8 @@
 
 AI agents that build software together. Give it a task and a repo — it coordinates Claude, Codex, and Gemini to implement, review, and ship code.
 
+> **Note:** This entire project was vibe-coded — built by AI agents orchestrating other AI agents, with a human steering the ship. The code, docs, tests, and even this README were produced by the swarm itself.
+
 ```
 You: "Add JWT auth to ~/projects/my-app"
 
