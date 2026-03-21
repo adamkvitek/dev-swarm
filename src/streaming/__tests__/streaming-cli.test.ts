@@ -389,16 +389,15 @@ describe("StreamingClaudeSession", () => {
   });
 
   describe("buildArgs (via spawn inspection)", () => {
-    it("should NOT include --verbose in CLI args", () => {
+    it("should include --verbose in CLI args (required by stream-json)", () => {
       const { proc } = createFakeProc();
       mockedSpawn.mockReturnValue(proc);
 
       const session = new StreamingClaudeSession("claude");
-      // Fire and forget — we only need to inspect args passed to spawn
       const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
 
       const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
-      expect(spawnArgs).not.toContain("--verbose");
+      expect(spawnArgs).toContain("--verbose");
 
       // Clean up: emit close to settle the promise
       const fakeProc = mockedSpawn.mock.results[0].value as unknown as EventEmitter;
