@@ -18,7 +18,7 @@ import { test, expect, type Page } from "@playwright/test";
  *      DISCORD_BOT_NAME
  *        Display name of the bot in your Discord server.
  *        Replace DISCORD_BOT_NAME with your bot's name.
- *        Example: Daskyleion
+ *        Example: dev-swarm
  *
  * Run with:
  *   DISCORD_TEST_CHANNEL_URL=YOUR_CHANNEL_URL \
