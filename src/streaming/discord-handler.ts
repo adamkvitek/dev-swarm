@@ -45,6 +45,14 @@ export class DiscordStreamHandler {
   private isFinalized = false;
   // Current tool use indicator (appended to message while active)
   private activeToolName: string | null = null;
+  // Whether the first flush has already fired
+  private firstFlushFired = false;
+
+  /**
+   * Callback invoked when the first message is actually sent/edited on Discord.
+   * Use this to stop typing indicators — the content is now visible to users.
+   */
+  onFirstFlush: (() => void) | null = null;
 
   constructor(channel: TextChannel, options?: { editIntervalMs?: number }) {
     this.channel = channel;
@@ -163,6 +171,12 @@ export class DiscordStreamHandler {
       } else {
         // Create first message
         this.currentMessage = await this.sendWithRetry(displayText);
+      }
+
+      // Fire onFirstFlush once — content is now visible in Discord
+      if (!this.firstFlushFired) {
+        this.firstFlushFired = true;
+        this.onFirstFlush?.();
       }
     } catch (err) {
       log.adapter.warn(

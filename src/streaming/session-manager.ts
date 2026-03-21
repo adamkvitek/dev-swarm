@@ -104,6 +104,22 @@ export class SessionManager {
   }
 
   /**
+   * Pre-warming is intentionally NOT implemented.
+   *
+   * Each send() spawns a fresh CLI process (`claude --print ...`), so there
+   * is no persistent process to keep warm. The `--resume` flag loads prior
+   * conversation context from disk but does not maintain a running process.
+   * Any "warm-up" message would:
+   *   1. Still pay the full CLI spawn + MCP connection cost on the next real message
+   *   2. Pollute the conversation history with a throwaway turn
+   *
+   * The real cold-start mitigation is:
+   *   - Removing --verbose (reduces stderr overhead)
+   *   - Session reuse via --resume (skips system prompt re-injection)
+   *   - Timing logs to identify where latency actually lives
+   */
+
+  /**
    * Clear all sessions. Used during shutdown.
    */
   clear(): void {

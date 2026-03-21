@@ -84,6 +84,8 @@ export class StreamingClaudeSession {
         return;
       }
 
+      const spawnTime = Date.now();
+
       const proc = spawn(this.claudeCli, args, {
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -92,6 +94,7 @@ export class StreamingClaudeSession {
       let settled = false;
       let accumulatedText = "";
       let streamResult: StreamResult | null = null;
+      let firstDataTime: number | null = null;
       // Track which content block indices are tool_use blocks
       const toolUseIndices = new Set<number>();
 
@@ -133,6 +136,13 @@ export class StreamingClaudeSession {
       let lineBuffer = "";
 
       proc.stdout.on("data", (data: Buffer) => {
+        if (firstDataTime === null) {
+          firstDataTime = Date.now();
+          log.adapter.info(
+            { sessionId: this.sessionId, spawnToFirstDataMs: firstDataTime - spawnTime },
+            "Streaming CLI first stdout data",
+          );
+        }
         lineBuffer += data.toString();
         const lines = lineBuffer.split("\n");
         // Keep the last incomplete line in the buffer
@@ -205,6 +215,19 @@ export class StreamingClaudeSession {
         const sessionId = streamResult?.session_id ?? this.sessionId ?? "";
         this.sessionId = sessionId || this.sessionId;
 
+        const totalElapsedMs = Date.now() - spawnTime;
+        const firstDataToResultMs = firstDataTime !== null ? Date.now() - firstDataTime : null;
+        log.adapter.info(
+          {
+            sessionId,
+            totalElapsedMs,
+            spawnToFirstDataMs: firstDataTime !== null ? firstDataTime - spawnTime : null,
+            firstDataToResultMs,
+            cliDurationMs: streamResult?.total_duration_ms ?? null,
+          },
+          "Streaming CLI completed",
+        );
+
         settle(resolve, {
           text: streamResult?.result ?? accumulatedText,
           sessionId,
@@ -231,7 +254,6 @@ export class StreamingClaudeSession {
   private buildArgs(): string[] {
     const args = [
       "--print",
-      "--verbose",
       "--output-format",
       "stream-json",
       ...this.extraArgs,

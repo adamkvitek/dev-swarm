@@ -1,5 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { SessionManager } from "../session-manager.js";
+
+// Mock the logger (SessionManager logs on create/reset/clear)
+vi.mock("../../logger.js", () => ({
+  log: {
+    adapter: {
+      info: vi.fn(),
+      debug: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    },
+  },
+}));
 
 describe("SessionManager", () => {
   const defaultOptions = {
@@ -105,5 +117,14 @@ describe("SessionManager", () => {
     const manager = new SessionManager(defaultOptions);
     // Should not throw
     manager.reset("non-existent-channel");
+  });
+
+  it("should not expose a preWarm method (intentionally omitted)", () => {
+    const manager = new SessionManager(defaultOptions);
+    // Pre-warming is intentionally not implemented because each send()
+    // spawns a fresh CLI process — there is no persistent process to warm.
+    // Any warm-up message would pollute conversation history without
+    // avoiding the per-message CLI spawn cost.
+    expect(manager).not.toHaveProperty("preWarm");
   });
 });

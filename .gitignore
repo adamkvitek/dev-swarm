@@ -29,6 +29,11 @@ logs/
 # Generated at runtime
 mcp-config.json
 
+# Playwright
+tests/e2e/.auth/
+test-results/
+playwright-report/
+
 #  local data
 ./
 .claude/settings.local.json

@@ -34,6 +34,8 @@ export class DiscordAdapter {
   private mcpConfigPath: string | null = null;
   private systemPrompt: string | null = null;
   private typingTimers = new Map<string, ReturnType<typeof setInterval>>();
+  /** Channels where users have sent messages this session — resource warnings go here only */
+  private activeChannels = new Map<string, TextChannel>();
 
   constructor(env: Env, jobManager: JobManager, resources: ResourceGuard) {
     this.env = env;
@@ -58,6 +60,8 @@ export class DiscordAdapter {
       for (const guild of this.client.guilds.cache.values()) {
         log.adapter.info({ guild: guild.name, guildId: guild.id }, "Connected to guild");
       }
+      // No startup banner — resource warnings are sent only to channels
+      // where users have active sessions, not guild-wide.
     });
 
     this.client.on("messageCreate", (message) => {
@@ -109,37 +113,41 @@ export class DiscordAdapter {
     if (!content) return;
 
     const channel = message.channel as TextChannel;
+    this.activeChannels.set(channel.id, channel);
     log.adapter.info(
       { author: message.author.tag, channel: channel.name, preview: content.slice(0, 100) },
       "Incoming message",
     );
 
-    const resourceSnap = this.resources.check();
-    if (!resourceSnap.healthy) {
-      await channel.send(
-        `I'm currently at ${resourceSnap.memoryUsedPct}% memory usage. ` +
-        `I need to wait for running tasks to finish.`
-      );
-      return;
-    }
-
     const release = await this.mutex.acquire(channel.id);
     const streamHandler = new DiscordStreamHandler(channel);
 
     try {
-      // Keep typing indicator alive until first token arrives
+      // Keep typing indicator alive until first message is visible in Discord
       this.startTyping(channel);
+      streamHandler.onFirstFlush = () => this.stopTyping(channel.id);
 
       const session = this.sessionManager.getOrCreate(channel.id);
-      const prompt = `[${message.author.displayName}]: ${content}`;
+
+      // Always process the message — inject resource constraint note if needed
+      const resourceSnap = this.resources.check();
+      let prompt = `[${message.author.displayName}]: ${content}`;
+      if (!resourceSnap.healthy || !resourceSnap.canSpawnMore) {
+        prompt += `\n\n[SYSTEM: Resources are constrained — memory at ${resourceSnap.memoryUsedPct}%. ` +
+          `Do not spawn new workers. Respond to the user's message normally but if they ask for worker tasks, ` +
+          `explain that worker spawning is paused until resources free up.]`;
+      }
 
       const result = await this.sessionLimiter(() =>
         session.send(prompt, {
           onTextDelta: (text) => {
-            this.stopTyping(channel.id);
             streamHandler.appendText(text);
           },
-          onToolUseStart: (name) => streamHandler.showToolUse(name),
+          onToolUseStart: (name) => {
+            // Re-enable typing during tool execution so users see activity
+            this.startTyping(channel);
+            streamHandler.showToolUse(name);
+          },
           onToolUseEnd: () => streamHandler.clearToolUse(),
         }, {
           timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,
@@ -177,6 +185,33 @@ export class DiscordAdapter {
     } finally {
       this.stopTyping(channel.id);
       release();
+
+      // Check resource state transitions and notify active channels
+      this.checkResourceTransitions();
+    }
+  }
+
+  /**
+   * Check for resource state changes and notify active channels.
+   * Only channels where users have sent messages this session get notified.
+   */
+  private checkResourceTransitions(): void {
+    const { warning, recovery } = this.resources.checkTransition();
+    const message = warning ?? recovery;
+    if (!message) return;
+
+    log.adapter.info(
+      { warning: !!warning, recovery: !!recovery, activeChannels: this.activeChannels.size },
+      "Resource state changed, notifying active channels",
+    );
+
+    for (const ch of this.activeChannels.values()) {
+      ch.send(message).catch((err) => {
+        log.adapter.warn(
+          { err: err instanceof Error ? err.message : String(err), channelId: ch.id },
+          "Failed to send resource notification",
+        );
+      });
     }
   }
 
@@ -320,14 +355,17 @@ export class DiscordAdapter {
 
     try {
       this.startTyping(channel);
+      streamHandler.onFirstFlush = () => this.stopTyping(channelId);
       const session = this.sessionManager.getOrCreate(channelId);
       const result = await this.sessionLimiter(() =>
         session.send(notification, {
           onTextDelta: (text) => {
-            this.stopTyping(channelId);
             streamHandler.appendText(text);
           },
-          onToolUseStart: (name) => streamHandler.showToolUse(name),
+          onToolUseStart: (name) => {
+            this.startTyping(channel);
+            streamHandler.showToolUse(name);
+          },
           onToolUseEnd: () => streamHandler.clearToolUse(),
         }, {
           timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,

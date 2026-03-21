@@ -1,5 +1,68 @@
-import { describe, it, expect } from "vitest";
-import { parseStreamLine } from "../streaming-cli.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { EventEmitter } from "node:events";
+import { parseStreamLine, StreamingClaudeSession } from "../streaming-cli.js";
+import type { StreamCallbacks } from "../types.js";
+
+// Mock child_process.spawn
+vi.mock("node:child_process", () => ({
+  spawn: vi.fn(),
+}));
+
+// Mock the logger to capture timing logs
+vi.mock("../../logger.js", () => ({
+  log: {
+    adapter: {
+      info: vi.fn(),
+      debug: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    },
+  },
+}));
+
+import { spawn } from "node:child_process";
+import { log } from "../../logger.js";
+
+/**
+ * Create a fake ChildProcess with EventEmitter-based stdin/stdout/stderr.
+ * Allows tests to simulate CLI output and exit events.
+ */
+function createFakeProc(): {
+  proc: ReturnType<typeof spawn>;
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  stdin: EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
+  emitClose: (code: number) => void;
+} {
+  const stdout = new EventEmitter();
+  const stderr = new EventEmitter();
+  const stdin = Object.assign(new EventEmitter(), {
+    write: vi.fn(),
+    end: vi.fn(),
+  });
+
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stderr,
+    stdin,
+    kill: vi.fn(),
+    pid: 12345,
+  }) as unknown as ReturnType<typeof spawn>;
+
+  const emitClose = (code: number): void => {
+    (proc as unknown as EventEmitter).emit("close", code);
+  };
+
+  return { proc, stdout, stderr, stdin, emitClose };
+}
+
+function noopCallbacks(): StreamCallbacks {
+  return {
+    onTextDelta: vi.fn(),
+    onToolUseStart: vi.fn(),
+    onToolUseEnd: vi.fn(),
+  };
+}
 
 describe("parseStreamLine", () => {
   describe("content_block_delta (text_delta)", () => {
@@ -309,6 +372,348 @@ describe("parseStreamLine", () => {
         expect(events[13].session_id).toBe("sess-1");
         expect(events[13].num_turns).toBe(2);
       }
+    });
+  });
+});
+
+describe("StreamingClaudeSession", () => {
+  const mockedSpawn = vi.mocked(spawn);
+  const mockedLogInfo = vi.mocked(log.adapter.info);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe("buildArgs (via spawn inspection)", () => {
+    it("should NOT include --verbose in CLI args", () => {
+      const { proc } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const session = new StreamingClaudeSession("claude");
+      // Fire and forget — we only need to inspect args passed to spawn
+      const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
+
+      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      expect(spawnArgs).not.toContain("--verbose");
+
+      // Clean up: emit close to settle the promise
+      const fakeProc = mockedSpawn.mock.results[0].value as unknown as EventEmitter;
+      (fakeProc as unknown as ReturnType<typeof createFakeProc>["proc"]).stdout.emit(
+        "data",
+        Buffer.from(JSON.stringify({
+          type: "result", subtype: "success", session_id: "s1",
+          result: "ok", cost_usd: 0, total_cost_usd: 0,
+          duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+        }) + "\n"),
+      );
+      fakeProc.emit("close", 0);
+
+      return promise;
+    });
+
+    it("should include --print and --output-format stream-json", () => {
+      const { proc, stdout, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const session = new StreamingClaudeSession("claude");
+      const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
+
+      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      expect(spawnArgs).toContain("--print");
+      expect(spawnArgs).toContain("--output-format");
+      expect(spawnArgs[spawnArgs.indexOf("--output-format") + 1]).toBe("stream-json");
+
+      // Settle
+      stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "s1",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      emitClose(0);
+
+      return promise;
+    });
+
+    it("should include extra args", () => {
+      const { proc, stdout, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const session = new StreamingClaudeSession("claude", ["--dangerously-skip-permissions"]);
+      const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
+
+      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      expect(spawnArgs).toContain("--dangerously-skip-permissions");
+
+      stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "s1",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      emitClose(0);
+
+      return promise;
+    });
+
+    it("should include --append-system-prompt on first message", () => {
+      const { proc, stdout, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const session = new StreamingClaudeSession("claude", [], undefined, "You are a bot");
+      const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
+
+      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      expect(spawnArgs).toContain("--append-system-prompt");
+      expect(spawnArgs[spawnArgs.indexOf("--append-system-prompt") + 1]).toBe("You are a bot");
+
+      stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "s1",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      emitClose(0);
+
+      return promise;
+    });
+
+    it("should include --resume with session ID on subsequent messages", async () => {
+      // First message — captures session ID
+      const fake1 = createFakeProc();
+      mockedSpawn.mockReturnValue(fake1.proc);
+
+      const session = new StreamingClaudeSession("claude", [], undefined, "You are a bot");
+      const p1 = session.send("first", noopCallbacks(), { timeoutMs: 1000 });
+
+      fake1.stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "sess-abc",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      fake1.emitClose(0);
+      await p1;
+
+      expect(session.isActive).toBe(true);
+      expect(session.id).toBe("sess-abc");
+
+      // Second message — should use --resume, no system prompt
+      const fake2 = createFakeProc();
+      mockedSpawn.mockReturnValue(fake2.proc);
+
+      const p2 = session.send("second", noopCallbacks(), { timeoutMs: 1000 });
+
+      const args2 = mockedSpawn.mock.calls[1][1] as string[];
+      expect(args2).toContain("--resume");
+      expect(args2[args2.indexOf("--resume") + 1]).toBe("sess-abc");
+      // System prompt should NOT be repeated on subsequent messages
+      expect(args2).not.toContain("--append-system-prompt");
+
+      fake2.stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "sess-abc",
+        result: "ok2", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      fake2.emitClose(0);
+      await p2;
+    });
+
+    it("should include --mcp-config when configured", () => {
+      const { proc, stdout, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const session = new StreamingClaudeSession("claude", [], "/tmp/mcp.json");
+      const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
+
+      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      expect(spawnArgs).toContain("--mcp-config");
+      expect(spawnArgs[spawnArgs.indexOf("--mcp-config") + 1]).toBe("/tmp/mcp.json");
+
+      stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "s1",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      emitClose(0);
+
+      return promise;
+    });
+  });
+
+  describe("timing logs", () => {
+    it("should log spawn-to-first-data timing on first stdout data", async () => {
+      const { proc, stdout, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const session = new StreamingClaudeSession("claude");
+      const promise = session.send("test", noopCallbacks(), { timeoutMs: 5000 });
+
+      // Emit first stdout data
+      stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "s1",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      emitClose(0);
+
+      await promise;
+
+      // Find the "first stdout data" log call
+      const firstDataLog = mockedLogInfo.mock.calls.find(
+        (call) => call[1] === "Streaming CLI first stdout data",
+      );
+      expect(firstDataLog).toBeDefined();
+      expect(firstDataLog![0]).toHaveProperty("spawnToFirstDataMs");
+      expect(typeof (firstDataLog![0] as Record<string, unknown>).spawnToFirstDataMs).toBe("number");
+    });
+
+    it("should log completion timing with all fields", async () => {
+      const { proc, stdout, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const session = new StreamingClaudeSession("claude");
+      const promise = session.send("test", noopCallbacks(), { timeoutMs: 5000 });
+
+      stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "s1",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 3500, is_error: false, num_turns: 1,
+      }) + "\n"));
+      emitClose(0);
+
+      await promise;
+
+      // Find the "completed" log call
+      const completedLog = mockedLogInfo.mock.calls.find(
+        (call) => call[1] === "Streaming CLI completed",
+      );
+      expect(completedLog).toBeDefined();
+      const logData = completedLog![0] as Record<string, unknown>;
+      expect(logData).toHaveProperty("sessionId", "s1");
+      expect(logData).toHaveProperty("totalElapsedMs");
+      expect(typeof logData.totalElapsedMs).toBe("number");
+      expect(logData).toHaveProperty("spawnToFirstDataMs");
+      expect(logData).toHaveProperty("firstDataToResultMs");
+      expect(logData).toHaveProperty("cliDurationMs", 3500);
+    });
+
+    it("should report null timing when no stdout data received before close", async () => {
+      const { proc, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const session = new StreamingClaudeSession("claude");
+      const promise = session.send("test", noopCallbacks(), { timeoutMs: 5000 });
+
+      // Close without any stdout data — this triggers the error path
+      emitClose(1);
+
+      await expect(promise).rejects.toThrow("Streaming CLI failed");
+    });
+  });
+
+  describe("session ID persistence", () => {
+    it("should preserve session ID across error on subsequent send", async () => {
+      // First send — establishes session
+      const fake1 = createFakeProc();
+      mockedSpawn.mockReturnValue(fake1.proc);
+
+      const session = new StreamingClaudeSession("claude");
+      const p1 = session.send("first", noopCallbacks(), { timeoutMs: 1000 });
+
+      fake1.stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "sess-keep",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      fake1.emitClose(0);
+      await p1;
+
+      expect(session.id).toBe("sess-keep");
+
+      // Second send — process fails with no result
+      const fake2 = createFakeProc();
+      mockedSpawn.mockReturnValue(fake2.proc);
+
+      const p2 = session.send("second", noopCallbacks(), { timeoutMs: 1000 });
+      fake2.emitClose(1);
+
+      await expect(p2).rejects.toThrow("Streaming CLI failed");
+
+      // Session ID should still be preserved
+      expect(session.id).toBe("sess-keep");
+    });
+
+    it("should reset session ID when reset() is called", async () => {
+      const fake1 = createFakeProc();
+      mockedSpawn.mockReturnValue(fake1.proc);
+
+      const session = new StreamingClaudeSession("claude");
+      const p1 = session.send("first", noopCallbacks(), { timeoutMs: 1000 });
+
+      fake1.stdout.emit("data", Buffer.from(JSON.stringify({
+        type: "result", subtype: "success", session_id: "sess-reset",
+        result: "ok", cost_usd: 0, total_cost_usd: 0,
+        duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+      }) + "\n"));
+      fake1.emitClose(0);
+      await p1;
+
+      expect(session.isActive).toBe(true);
+      session.reset();
+      expect(session.isActive).toBe(false);
+      expect(session.id).toBeNull();
+    });
+  });
+
+  describe("callbacks", () => {
+    it("should invoke onTextDelta for text tokens", async () => {
+      const { proc, stdout, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const callbacks = noopCallbacks();
+      const session = new StreamingClaudeSession("claude");
+      const promise = session.send("test", callbacks, { timeoutMs: 1000 });
+
+      stdout.emit("data", Buffer.from(
+        JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }) + "\n" +
+        JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: " world" } }) + "\n" +
+        JSON.stringify({
+          type: "result", subtype: "success", session_id: "s1",
+          result: "Hello world", cost_usd: 0, total_cost_usd: 0,
+          duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+        }) + "\n",
+      ));
+      emitClose(0);
+
+      const result = await promise;
+      expect(callbacks.onTextDelta).toHaveBeenCalledWith("Hello");
+      expect(callbacks.onTextDelta).toHaveBeenCalledWith(" world");
+      expect(result.text).toBe("Hello world");
+    });
+
+    it("should invoke onToolUseStart and onToolUseEnd", async () => {
+      const { proc, stdout, emitClose } = createFakeProc();
+      mockedSpawn.mockReturnValue(proc);
+
+      const callbacks = noopCallbacks();
+      const session = new StreamingClaudeSession("claude");
+      const promise = session.send("test", callbacks, { timeoutMs: 1000 });
+
+      stdout.emit("data", Buffer.from(
+        JSON.stringify({ type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "t1", name: "read_file" } }) + "\n" +
+        JSON.stringify({ type: "content_block_stop", index: 1 }) + "\n" +
+        JSON.stringify({
+          type: "result", subtype: "success", session_id: "s1",
+          result: "", cost_usd: 0, total_cost_usd: 0,
+          duration_ms: 10, total_duration_ms: 10, is_error: false, num_turns: 1,
+        }) + "\n",
+      ));
+      emitClose(0);
+
+      await promise;
+      expect(callbacks.onToolUseStart).toHaveBeenCalledWith("read_file");
+      expect(callbacks.onToolUseEnd).toHaveBeenCalledTimes(1);
     });
   });
 });

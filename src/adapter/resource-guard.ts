@@ -66,14 +66,21 @@ function getAvailableMemoryBytes(): number {
   return freemem();
 }
 
+export interface ResourceTransition {
+  warning: string | null;
+  recovery: string | null;
+}
+
 /**
  * Checks system resources before processing a message.
- * Refuses to start new work when memory exceeds the ceiling or workers are at capacity.
+ * Tracks state transitions to detect when constraints start or resolve.
  */
 export class ResourceGuard {
   private memoryCeilingPct: number;
   private maxWorkers: number;
   private getActiveWorkerCount: () => number;
+  private prevMemoryOver = false;
+  private prevWorkersOver = false;
 
   constructor(
     memoryCeilingPct: number = 80,
@@ -112,11 +119,90 @@ export class ResourceGuard {
 
   /**
    * Returns a human-readable status string for injection into Claude's context.
+   * Technical details included — this is for the system prompt, not user-facing.
    */
   statusLine(): string {
     const snap = this.check();
     const memLine = `Memory: ${snap.memoryUsedMb}MB / ${snap.memoryTotalMb}MB (${snap.memoryUsedPct}%, ${snap.memoryAvailableMb}MB available)${snap.healthy ? "" : " [OVER LIMIT]"}`;
     const workerLine = `Workers: ${snap.activeWorkers}/${snap.maxWorkers}${snap.canSpawnMore ? "" : " [AT CAPACITY]"}`;
     return `${memLine} | ${workerLine}`;
+  }
+
+  /**
+   * Returns a plain-language status for Discord users.
+   * Returns null when resources are healthy — no message needed.
+   * Specific: mentions memory only if memory is the issue, workers only if workers are the issue.
+   */
+  userFacingStatus(): string | null {
+    const snap = this.check();
+    const memoryOver = !snap.healthy;
+    const workersOver = snap.activeWorkers >= snap.maxWorkers;
+    if (!memoryOver && !workersOver) return null;
+
+    const parts: string[] = [];
+
+    if (memoryOver) {
+      parts.push(`Memory usage is high (at ${snap.memoryUsedPct}%).`);
+    }
+
+    if (workersOver) {
+      parts.push("All worker slots are in use.");
+    }
+
+    parts.push(
+      "Worker spawning is paused — I can still chat, but won't be able to run parallel build tasks until resources free up."
+    );
+
+    return parts.join(" ");
+  }
+
+  /**
+   * Check resource state and detect transitions.
+   * Returns a warning when resources become constrained, or a recovery
+   * message when they free up. Returns both null when state hasn't changed.
+   *
+   * Call this on every message to track state changes over time.
+   */
+  checkTransition(): ResourceTransition {
+    const snap = this.check();
+    const memoryOver = !snap.healthy;
+    const workersOver = snap.activeWorkers >= snap.maxWorkers;
+
+    let warning: string | null = null;
+    let recovery: string | null = null;
+
+    // Detect newly constrained resources
+    const newConstraints: string[] = [];
+    if (memoryOver && !this.prevMemoryOver) {
+      newConstraints.push(`Memory usage is high (at ${snap.memoryUsedPct}%).`);
+    }
+    if (workersOver && !this.prevWorkersOver) {
+      newConstraints.push("All worker slots are in use.");
+    }
+    if (newConstraints.length > 0) {
+      newConstraints.push(
+        "Worker spawning is paused — I can still chat, but won't be able to run parallel build tasks until resources free up."
+      );
+      warning = newConstraints.join(" ");
+    }
+
+    // Detect recovery
+    const recovered: string[] = [];
+    if (!memoryOver && this.prevMemoryOver) {
+      recovered.push("Memory usage is back to normal.");
+    }
+    if (!workersOver && this.prevWorkersOver) {
+      recovered.push("Worker slots are available again.");
+    }
+    if (recovered.length > 0) {
+      recovered.push("Full capabilities restored.");
+      recovery = recovered.join(" ");
+    }
+
+    // Update state
+    this.prevMemoryOver = memoryOver;
+    this.prevWorkersOver = workersOver;
+
+    return { warning, recovery };
   }
 }

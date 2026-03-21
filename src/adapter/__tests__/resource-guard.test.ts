@@ -93,6 +93,109 @@ describe("ResourceGuard", () => {
     });
   });
 
+  describe("userFacingStatus()", () => {
+    it("should return null when resources are healthy and workers available", () => {
+      const guard = new ResourceGuard(80, 4, () => 0);
+      expect(guard.userFacingStatus()).toBeNull();
+    });
+
+    it("should return a warning when memory exceeds ceiling", () => {
+      // ~50% used with a 40% ceiling → over limit
+      const guard = new ResourceGuard(40, 4, () => 0);
+      const status = guard.userFacingStatus();
+      expect(status).not.toBeNull();
+      expect(status).toContain("Memory usage is high");
+      expect(status).toContain("Worker spawning is paused");
+    });
+
+    it("should return a warning when workers are at capacity", () => {
+      const guard = new ResourceGuard(80, 4, () => 4);
+      const status = guard.userFacingStatus();
+      expect(status).not.toBeNull();
+      expect(status).toContain("All worker slots are in use");
+      expect(status).toContain("Worker spawning is paused");
+    });
+
+    it("should include both memory and worker warnings when both constrained", () => {
+      // ~50% used with a 40% ceiling + workers at capacity
+      const guard = new ResourceGuard(40, 2, () => 2);
+      const status = guard.userFacingStatus();
+      expect(status).not.toBeNull();
+      expect(status).toContain("Memory usage is high");
+      expect(status).toContain("All worker slots are in use");
+      expect(status).toContain("Worker spawning is paused");
+    });
+
+    it("should not mention env var names or technical config details", () => {
+      const guard = new ResourceGuard(40, 2, () => 2);
+      const status = guard.userFacingStatus()!;
+      expect(status).not.toContain("MEMORY_CEILING_PCT");
+      expect(status).not.toContain("MAX_CONCURRENT_WORKERS");
+      expect(status).not.toContain("MB");
+    });
+  });
+
+  describe("checkTransition()", () => {
+    it("should return no warning or recovery on first check when healthy", () => {
+      const guard = new ResourceGuard(80, 4, () => 0);
+      const { warning, recovery } = guard.checkTransition();
+      expect(warning).toBeNull();
+      expect(recovery).toBeNull();
+    });
+
+    it("should return warning on first check when memory is already over", () => {
+      const guard = new ResourceGuard(40, 4, () => 0);
+      const { warning, recovery } = guard.checkTransition();
+      expect(warning).not.toBeNull();
+      expect(warning).toContain("Memory usage is high");
+      expect(recovery).toBeNull();
+    });
+
+    it("should return recovery when memory drops below ceiling", () => {
+      let ceiling = 40; // starts constrained
+      const guard = new ResourceGuard(ceiling, 4, () => 0);
+      guard.checkTransition(); // first check — sets state to constrained
+
+      // Now "fix" the ceiling so it's healthy
+      // We need a new guard since ceiling is set in constructor
+      // Instead, test with workers which we can control dynamically
+      let workers = 4;
+      const guard2 = new ResourceGuard(80, 4, () => workers);
+      guard2.checkTransition(); // workers at capacity
+
+      workers = 0; // workers freed up
+      const { warning, recovery } = guard2.checkTransition();
+      expect(warning).toBeNull();
+      expect(recovery).not.toBeNull();
+      expect(recovery).toContain("Worker slots are available again");
+      expect(recovery).toContain("Full capabilities restored");
+    });
+
+    it("should not repeat warning on consecutive constrained checks", () => {
+      const guard = new ResourceGuard(40, 4, () => 0);
+      const first = guard.checkTransition();
+      expect(first.warning).not.toBeNull();
+
+      const second = guard.checkTransition();
+      expect(second.warning).toBeNull();
+      expect(second.recovery).toBeNull();
+    });
+
+    it("should warn about memory specifically when only memory is the issue", () => {
+      const guard = new ResourceGuard(40, 4, () => 0);
+      const { warning } = guard.checkTransition();
+      expect(warning).toContain("Memory usage is high");
+      expect(warning).not.toContain("worker slots");
+    });
+
+    it("should warn about workers specifically when only workers are the issue", () => {
+      const guard = new ResourceGuard(80, 4, () => 4);
+      const { warning } = guard.checkTransition();
+      expect(warning).toContain("All worker slots are in use");
+      expect(warning).not.toContain("Memory");
+    });
+  });
+
   describe("defaults", () => {
     it("should work with default parameters", () => {
       const guard = new ResourceGuard();

@@ -48,8 +48,9 @@ async function main(): Promise<void> {
   // which Claude reads via CLAUDE.md or the MCP server context
   const shortPrompt =
     "You are Daskyleion, a CTO-level AI agent leading a dev swarm. " +
-    "You MUST delegate all work via MCP tools (spawn_workers, spawn_council, spawn_review). " +
-    "Never analyze code yourself. Read prompts/system.md for full instructions.";
+    "You orchestrate work using MCP tools (spawn_workers, spawn_council, spawn_review) " +
+    "and native Claude Code Agent tool for parallel work. " +
+    "You may read code to understand context. Read prompts/system.md for full instructions.";
 
   console.log("Server ready. Launching Claude Code...\n");
 
