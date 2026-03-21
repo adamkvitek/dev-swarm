@@ -71,6 +71,9 @@ export interface ResourceTransition {
   recovery: string | null;
 }
 
+/** Hysteresis margin: recovery fires when usage drops this many % below the ceiling. */
+const RECOVERY_HYSTERESIS_PCT = 15;
+
 /**
  * Checks system resources before processing a message.
  * Tracks state transitions to detect when constraints start or resolve.
@@ -81,6 +84,8 @@ export class ResourceGuard {
   private getActiveWorkerCount: () => number;
   private prevMemoryOver = false;
   private prevWorkersOver = false;
+  private monitorTimer: ReturnType<typeof setInterval> | null = null;
+  private wasConstrained = false;
 
   constructor(
     memoryCeilingPct: number = 80,
@@ -90,6 +95,81 @@ export class ResourceGuard {
     this.memoryCeilingPct = memoryCeilingPct;
     this.maxWorkers = maxWorkers;
     this.getActiveWorkerCount = getActiveWorkerCount;
+  }
+
+  /**
+   * Start a periodic resource monitor that checks every `intervalMs`.
+   *
+   * Uses hysteresis to avoid oscillation: recovery only fires when memory
+   * drops 15% below the ceiling (e.g., ceiling 92% → recovery at 77%).
+   * This prevents rapid warn/recover cycles when usage hovers near the limit.
+   *
+   * The callback receives a `ResourceTransition` only when state changes.
+   * It is NOT called on every poll — only on transitions.
+   */
+  startMonitoring(
+    callback: (transition: ResourceTransition) => void,
+    intervalMs: number = 30_000,
+  ): void {
+    this.stopMonitoring();
+    this.monitorTimer = setInterval(() => {
+      const transition = this.checkTransitionWithHysteresis();
+      if (transition.warning || transition.recovery) {
+        callback(transition);
+      }
+    }, intervalMs);
+  }
+
+  stopMonitoring(): void {
+    if (this.monitorTimer) {
+      clearInterval(this.monitorTimer);
+      this.monitorTimer = null;
+    }
+  }
+
+  /**
+   * Like checkTransition() but uses hysteresis for recovery.
+   * Warning fires at the ceiling. Recovery fires 15% below the ceiling.
+   * This prevents oscillation when usage hovers near the threshold.
+   */
+  private checkTransitionWithHysteresis(): ResourceTransition {
+    const snap = this.check();
+    const memoryOver = !snap.healthy;
+    const workersOver = snap.activeWorkers >= snap.maxWorkers;
+    const isConstrained = memoryOver || workersOver;
+
+    // Recovery threshold: memory must drop RECOVERY_HYSTERESIS_PCT below the ceiling
+    const recoveryThreshold = this.memoryCeilingPct - RECOVERY_HYSTERESIS_PCT;
+    const memoryWellBelow = snap.memoryUsedPct < recoveryThreshold;
+    const workersRecovered = snap.activeWorkers < snap.maxWorkers;
+
+    let warning: string | null = null;
+    let recovery: string | null = null;
+
+    // Entering constrained state
+    if (isConstrained && !this.wasConstrained) {
+      const parts: string[] = [];
+      if (memoryOver) parts.push(`Memory usage is high (at ${snap.memoryUsedPct}%).`);
+      if (workersOver) parts.push("All worker slots are in use.");
+      parts.push("Worker spawning is paused — I can still chat, but won't be able to run parallel build tasks until resources free up.");
+      warning = parts.join(" ");
+      this.wasConstrained = true;
+    }
+
+    // Recovery: only when usage drops well below threshold (hysteresis)
+    if (this.wasConstrained && memoryWellBelow && workersRecovered) {
+      const parts: string[] = [];
+      if (this.prevMemoryOver) parts.push(`Memory usage has dropped to ${snap.memoryUsedPct}% — well below the ${this.memoryCeilingPct}% threshold.`);
+      if (this.prevWorkersOver) parts.push("Worker slots are available again.");
+      parts.push("Full capabilities restored — ready to resume work.");
+      recovery = parts.join(" ");
+      this.wasConstrained = false;
+    }
+
+    this.prevMemoryOver = memoryOver;
+    this.prevWorkersOver = workersOver;
+
+    return { warning, recovery };
   }
 
   check(): ResourceSnapshot {

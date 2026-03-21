@@ -62,6 +62,11 @@ export class DiscordAdapter {
       }
       // No startup banner — resource warnings are sent only to channels
       // where users have active sessions, not guild-wide.
+
+      // Start proactive resource monitoring (polls every 30s)
+      this.resources.startMonitoring((transition) => {
+        this.handleProactiveResourceChange(transition);
+      });
     });
 
     this.client.on("messageCreate", (message) => {
@@ -85,6 +90,7 @@ export class DiscordAdapter {
 
   async stop(): Promise<void> {
     log.adapter.info("Shutting down...");
+    this.resources.stopMonitoring();
     for (const timer of this.typingTimers.values()) clearInterval(timer);
     this.typingTimers.clear();
     this.sessionManager.clear();
@@ -212,6 +218,71 @@ export class DiscordAdapter {
           "Failed to send resource notification",
         );
       });
+    }
+  }
+
+  /**
+   * Handle proactive resource state changes detected by the periodic monitor.
+   * On recovery: notifies active channels AND injects a [SYSTEM] prompt into
+   * active Claude sessions telling the CTO to resume interrupted work.
+   */
+  private handleProactiveResourceChange(transition: { warning: string | null; recovery: string | null }): void {
+    const message = transition.warning ?? transition.recovery;
+    if (!message || this.activeChannels.size === 0) return;
+
+    log.adapter.info(
+      { warning: !!transition.warning, recovery: !!transition.recovery, activeChannels: this.activeChannels.size },
+      "Proactive resource monitor triggered",
+    );
+
+    for (const ch of this.activeChannels.values()) {
+      // Send user-facing notification
+      ch.send(message).catch((err) => {
+        log.adapter.warn(
+          { err: err instanceof Error ? err.message : String(err), channelId: ch.id },
+          "Failed to send proactive resource notification",
+        );
+      });
+
+      // On recovery: inject a system prompt into the Claude session
+      // so the CTO knows it can resume interrupted work
+      if (transition.recovery && this.sessionManager.hasSession(ch.id)) {
+        const session = this.sessionManager.getOrCreate(ch.id);
+        const streamHandler = new DiscordStreamHandler(ch);
+        this.startTyping(ch);
+        streamHandler.onFirstFlush = () => this.stopTyping(ch.id);
+
+        const resumePrompt =
+          "[SYSTEM: Resources have recovered — full capabilities restored. " +
+          "If you were working on a task that was interrupted by resource constraints, " +
+          "resume where you left off. Check resources with check_resources to confirm, " +
+          "then continue. Do not start new work that wasn't already requested.]";
+
+        this.sessionLimiter(() =>
+          session.send(resumePrompt, {
+            onTextDelta: (text) => streamHandler.appendText(text),
+            onToolUseStart: (name) => {
+              this.startTyping(ch);
+              streamHandler.showToolUse(name);
+            },
+            onToolUseEnd: () => streamHandler.clearToolUse(),
+          }, {
+            timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,
+          }),
+        ).then(async (result) => {
+          await streamHandler.finalize();
+          if (!streamHandler.hasContent && result.text) {
+            await this.sendChunked(ch, result.text);
+          }
+        }).catch(async (err) => {
+          this.stopTyping(ch.id);
+          await streamHandler.finalize();
+          log.adapter.error(
+            { err: err instanceof Error ? err.message : String(err), channelId: ch.id },
+            "Failed to send resume prompt after recovery",
+          );
+        });
+      }
     }
   }
 
