@@ -64,7 +64,7 @@ MCP Server (src/mcp/server.ts + src/mcp/tools.ts)
 
 ## Code conventions
 
-- **TypeScript** with `strict: true`. No `any` — use `unknown` and narrow.
+- **TypeScript** with `strict: true` and `noUncheckedIndexedAccess: true`. No `any` — use `unknown` and narrow.
 - **Logging**: structured via pino — `log.adapter.info(...)`, `log.jobMgr.info(...)`. Never `console.log` in src/.
 - **Validation**: Zod at system boundaries (env vars, API input). Trust internal types.
 - **Imports**: `.js` extensions required (NodeNext module resolution).
@@ -112,3 +112,9 @@ When agents target THIS repository:
 2. Self-repo detection fingerprints the target repo
 3. Prompt restrictions warn workers about protected paths
 4. CODEOWNERS requires human review for infrastructure changes
+
+MCP tool restrictions (enforced in `src/mcp/server.ts`):
+- `run_command`: allowlisted binaries only. `git` restricted to read-only subcommands. `npm run` limited to `typecheck/lint/build/test`.
+- `read_file`: blocks system dirs (`/etc`, `/var`, ...) and sensitive home paths (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`). Resolves symlinks before checking.
+- Per-channel mutex prevents concurrent session access. Idle sessions evicted after 4h.
+- Stale worktrees cleaned up on startup. Pending job queue cleared on shutdown.
