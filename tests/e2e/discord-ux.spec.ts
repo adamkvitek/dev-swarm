@@ -153,7 +153,7 @@ test.describe("Discord Bot UX", () => {
 
     const typingIndicator = page.locator(
       '[class*="typing"], [class*="typingIndicator"]',
-    );
+    ).first();
     await expect(typingIndicator).toBeVisible({ timeout: 5_000 });
   });
 
