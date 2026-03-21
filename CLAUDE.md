@@ -91,7 +91,7 @@ Resource limits auto-detect from hardware. See `.env.example` for all options.
 npm test                    # all vitest tests (unit + integration)
 npm test -- --watch         # watch mode
 npm run test:e2e:setup      # one-time: save Discord auth for Playwright
-npm run test:e2e            # Playwright Discord UX tests (needs running bot + DISCORD_TEST_CHANNEL_URL)
+DISCORD_TEST_CHANNEL_URL=URL DISCORD_BOT_NAME=NAME npm run test:e2e  # Playwright Discord UX tests
 ```
 
 ## Multi-model agents
