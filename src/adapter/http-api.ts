@@ -122,7 +122,7 @@ export class HttpApi {
           ? validateSafeText(body.previousFeedback, "previousFeedback", 10_000)
           : undefined;
 
-        const result = this.jobManager.createWorkerJob(
+        const job = this.jobManager.createWorkerJob(
           channelId,
           subtasks,
           techStack,
@@ -130,10 +130,12 @@ export class HttpApi {
           previousFeedback,
         );
 
-        if ("error" in result) {
-          return sendJson(res, 429, result);
-        }
-        return sendJson(res, 201, { job_id: result.id, status: result.status });
+        return sendJson(res, 201, {
+          job_id: job.id,
+          status: job.status,
+          queued: job.status === "queued",
+          queue_depth: this.jobManager.getQueueDepth(),
+        });
       }
 
       // POST /jobs/council

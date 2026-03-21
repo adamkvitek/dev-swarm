@@ -8,7 +8,7 @@ import type { Env } from "../config/env.js";
 import type { WorktreeManager, MergeResult } from "../workspace/worktree-manager.js";
 import { log } from "../logger.js";
 
-export type JobStatus = "running" | "completed" | "failed" | "cancelled";
+export type JobStatus = "running" | "completed" | "failed" | "cancelled" | "queued";
 
 interface JobBase {
   id: string;
@@ -48,6 +48,13 @@ const MAX_STORED_JOBS = 1000;
  * of workers and reviewers, and fires a callback when jobs finish so the
  * adapter can notify Claude.
  */
+interface QueuedJob {
+  job: WorkerJob;
+  techStack: string[];
+  previousFeedback?: string;
+  isCouncil: boolean;
+}
+
 export class JobManager {
   private jobs = new Map<string, Job>();
   private abortControllers = new Map<string, AbortController>();
@@ -59,6 +66,7 @@ export class JobManager {
   private worktreeManager: WorktreeManager;
   private env: Env;
   private onJobComplete: JobCompleteCallback | null = null;
+  private pendingQueue: QueuedJob[] = [];
 
   constructor(
     env: Env,
@@ -106,40 +114,30 @@ export class JobManager {
     techStack: string[],
     repoPath: string,
     previousFeedback?: string,
-  ): Job | { error: string } {
-    // Resource check: active workers + new batch must not exceed limit
-    const activeCount = this.getActiveWorkerCount();
-    if (activeCount + subtasks.length > this.env.MAX_CONCURRENT_WORKERS) {
-      return {
-        error: `Cannot spawn ${subtasks.length} workers: ${activeCount} already active, max ${this.env.MAX_CONCURRENT_WORKERS}. Wait for current jobs to finish.`,
-      };
-    }
-
+  ): Job {
     const job: WorkerJob = {
       id: randomUUID(),
       channelId,
       type: "workers",
-      status: "running",
+      status: "queued",
       createdAt: Date.now(),
       subtasks,
       repoPath,
     };
     this.storeJob(job);
 
-    // Fire and forget — runs in background, calls onJobComplete when done
-    void this.runJob(
-      job,
-      () => this.workerAgent.executeParallel(job.subtasks, {
-        techStack,
-        repoPath: job.repoPath!,
-        worktreeManager: this.worktreeManager,
-        previousFeedback,
-        signal: this.abortControllers.get(job.id)!.signal,
-      }),
-      (results) => { job.workerResults = results; },
-      `Worker job ${job.id} completed (${subtasks.length} subtasks)`,
-    );
+    // Try to start immediately; if at capacity, queue it
+    const activeCount = this.getActiveWorkerCount();
+    if (activeCount + subtasks.length > this.env.MAX_CONCURRENT_WORKERS) {
+      this.pendingQueue.push({ job, techStack, previousFeedback, isCouncil: false });
+      log.jobMgr.info(
+        { jobId: job.id, active: activeCount, needed: subtasks.length, max: this.env.MAX_CONCURRENT_WORKERS, queueDepth: this.pendingQueue.length },
+        "Job queued — workers at capacity",
+      );
+      return job;
+    }
 
+    this.startWorkerJob(job, techStack, previousFeedback, false);
     return job;
   }
 
@@ -154,39 +152,30 @@ export class JobManager {
       return { error: "Council worker not configured" };
     }
 
-    // Council uses 3x resources per subtask (3 models)
-    const activeCount = this.getActiveWorkerCount();
-    const needed = subtasks.length * 3;
-    if (activeCount + needed > this.env.MAX_CONCURRENT_WORKERS * 3) {
-      return {
-        error: `Cannot spawn council: needs ${needed} worker slots (${subtasks.length} subtasks × 3 models), ${activeCount} already active. Wait for current jobs to finish.`,
-      };
-    }
-
     const job: WorkerJob = {
       id: randomUUID(),
       channelId,
       type: "workers",
-      status: "running",
+      status: "queued",
       createdAt: Date.now(),
       subtasks,
       repoPath,
     };
     this.storeJob(job);
 
-    void this.runJob(
-      job,
-      () => this.councilWorker!.executeParallel(job.subtasks, {
-        techStack,
-        repoPath: job.repoPath!,
-        worktreeManager: this.worktreeManager,
-        previousFeedback,
-        signal: this.abortControllers.get(job.id)!.signal,
-      }),
-      (results) => { job.workerResults = results; },
-      `Council job ${job.id} completed (${subtasks.length} subtasks × 3 models)`,
-    );
+    // Council uses 3x resources per subtask (3 models)
+    const activeCount = this.getActiveWorkerCount();
+    const needed = subtasks.length * 3;
+    if (activeCount + needed > this.env.MAX_CONCURRENT_WORKERS * 3) {
+      this.pendingQueue.push({ job, techStack, previousFeedback, isCouncil: true });
+      log.jobMgr.info(
+        { jobId: job.id, active: activeCount, needed, max: this.env.MAX_CONCURRENT_WORKERS * 3, queueDepth: this.pendingQueue.length },
+        "Council job queued — at capacity",
+      );
+      return job;
+    }
 
+    this.startWorkerJob(job, techStack, previousFeedback, true);
     return job;
   }
 
@@ -313,7 +302,65 @@ export class JobManager {
     });
   }
 
+  /**
+   * Number of jobs waiting in the queue.
+   */
+  getQueueDepth(): number {
+    return this.pendingQueue.length;
+  }
+
+  /**
+   * Called by the resource monitor when resources recover.
+   * Tries to start queued jobs that now fit within limits.
+   */
+  drainQueue(): number {
+    let started = 0;
+    while (this.pendingQueue.length > 0) {
+      const next = this.pendingQueue[0];
+      const activeCount = this.getActiveWorkerCount();
+      const needed = next.isCouncil ? next.job.subtasks.length * 3 : next.job.subtasks.length;
+      const max = next.isCouncil ? this.env.MAX_CONCURRENT_WORKERS * 3 : this.env.MAX_CONCURRENT_WORKERS;
+
+      if (activeCount + needed > max) break; // Still at capacity
+
+      this.pendingQueue.shift();
+      this.startWorkerJob(next.job, next.techStack, next.previousFeedback, next.isCouncil);
+      started++;
+    }
+
+    if (started > 0) {
+      log.jobMgr.info({ started, remaining: this.pendingQueue.length }, "Drained queued jobs");
+    }
+    return started;
+  }
+
   // --- Internal helpers ---
+
+  private startWorkerJob(
+    job: WorkerJob,
+    techStack: string[],
+    previousFeedback: string | undefined,
+    isCouncil: boolean,
+  ): void {
+    job.status = "running";
+    const agent = isCouncil ? this.councilWorker! : this.workerAgent;
+    const label = isCouncil
+      ? `Council job ${job.id} completed (${job.subtasks.length} subtasks × 3 models)`
+      : `Worker job ${job.id} completed (${job.subtasks.length} subtasks)`;
+
+    void this.runJob(
+      job,
+      () => agent.executeParallel(job.subtasks, {
+        techStack,
+        repoPath: job.repoPath!,
+        worktreeManager: this.worktreeManager,
+        previousFeedback,
+        signal: this.abortControllers.get(job.id)!.signal,
+      }),
+      (results) => { job.workerResults = results; },
+      label,
+    );
+  }
 
   /**
    * Store a job with hard cap enforcement.
@@ -371,6 +418,8 @@ export class JobManager {
           log.jobMgr.error({ err }, "onJobComplete callback error");
         });
       }
+      // After any job finishes, try to start queued jobs
+      this.drainQueue();
     }
   }
 

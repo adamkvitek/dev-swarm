@@ -19,6 +19,7 @@ function createMockJobManager(): JobManager {
     getJob: (id: string) => jobs.get(id),
     getJobs: (_f?: { channelId?: string; status?: JobStatus }) => Array.from(jobs.values()),
     getActiveWorkerCount: () => 0,
+    getQueueDepth: () => 0,
   } as unknown as JobManager;
 }
 
