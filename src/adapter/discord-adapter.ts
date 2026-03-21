@@ -137,7 +137,8 @@ export class DiscordAdapter {
 
       // Always process the message — inject resource constraint note if needed
       const resourceSnap = this.resources.check();
-      let prompt = `[${message.author.displayName}]: ${content}`;
+      const timestamp = new Date().toISOString().replace("T", " ").slice(0, 16);
+      let prompt = `[${message.author.displayName} at ${timestamp}]: ${content}`;
       if (!resourceSnap.healthy || !resourceSnap.canSpawnMore) {
         const issues: string[] = [];
         if (!resourceSnap.memoryHealthy) issues.push(`memory at ${resourceSnap.memoryUsedPct}%`);
