@@ -5,7 +5,7 @@ Thanks for your interest in dev-swarm. Here's how to contribute.
 ## Getting started
 
 ```bash
-git clone https://github.com/AKTech-ai/dev-swarm.git
+git clone https://github.com/adamkvitek/dev-swarm.git
 cd dev-swarm
 npm install
 ```
@@ -60,7 +60,7 @@ Tests live next to the code they test in `__tests__/` directories.
 
 ## What needs help
 
-Check the [issues](https://github.com/AKTech-ai/dev-swarm/issues) for open tasks. Good first issues are labeled accordingly.
+Check the [issues](https://github.com/adamkvitek/dev-swarm/issues) for open tasks. Good first issues are labeled accordingly.
 
 ## License
 

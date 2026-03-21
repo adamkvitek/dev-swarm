@@ -105,4 +105,40 @@ export const TOOL_DEFINITIONS = {
       "Check system resources and worker capacity. Use this before spawning workers to see if the system can handle more work.",
     inputSchema: {},
   },
+  // --- Safe utility tools (run locally in MCP server, no HTTP API) ---
+
+  get_time: {
+    description:
+      "Get the current date and time. Use this when you need to know the current time, day, or date.",
+    inputSchema: {
+      timezone: z
+        .string()
+        .optional()
+        .describe("IANA timezone (e.g. 'America/New_York'). Defaults to system timezone."),
+    },
+  },
+
+  read_file: {
+    description:
+      "Read the contents of a file. Path must be absolute and within a user's project directory. Cannot read system files.",
+    inputSchema: {
+      path: z.string().describe("Absolute path to the file to read"),
+      max_lines: z
+        .number()
+        .int()
+        .min(1)
+        .max(5000)
+        .optional()
+        .describe("Maximum number of lines to return (default: 500)"),
+    },
+  },
+
+  run_command: {
+    description:
+      "Run an allowlisted command. Only safe, read-only commands are permitted: git status, git log, git diff, git branch, ls, cat, wc, head, tail, find, tree, npm test, npm run typecheck, npm run lint.",
+    inputSchema: {
+      command: z.string().describe("The allowlisted command to run (e.g. 'git status')"),
+      cwd: z.string().optional().describe("Working directory (absolute path)"),
+    },
+  },
 } as const;

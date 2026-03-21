@@ -75,6 +75,7 @@ npm run dev-swarm
 
 ```bash
 # Set DISCORD_BOT_TOKEN in .env first
+
 npm run dev     # development (pretty logs)
 npm start       # production (JSON logs)
 ```
@@ -102,8 +103,8 @@ cp .env.example .env
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISCORD_BOT_TOKEN` | | Required for Discord mode only |
-| `MAX_CONCURRENT_WORKERS` | 75% of CPU cores | Max parallel worker agents |
-| `MEMORY_CEILING_PCT` | 92% (macOS) / 90% (Linux) | Refuse new work above this threshold |
+| `MAX_CONCURRENT_WORKERS` | 75% of CPU cores (min 2) | Max parallel worker agents |
+| `MEMORY_CEILING_PCT` | 92% | Refuse new work above this threshold |
 | `REVIEW_QUALITY_THRESHOLD` | 8 | Score (1-10) needed to approve |
 | `WORKSPACE_DIR` | `~/dev/swarm-workspace` | Where git worktrees are created |
 | `LOG_LEVEL` | info | debug, info, warn, error |

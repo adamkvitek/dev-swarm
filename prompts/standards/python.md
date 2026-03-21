@@ -8,10 +8,12 @@ Every function gets full type annotations -- parameters and return types. Config
 
 ```python
 # BAD
+
 def get_user(user_id):
     return db.find(user_id)
 
 # GOOD
+
 def get_user(user_id: str) -> User | None:
     return db.find(user_id)
 ```
@@ -22,11 +24,13 @@ Use `T | None` for nullable types. Never rely on implicit `None` returns. Always
 
 ```python
 # BAD: implicit None return, caller has no idea
+
 def find_user(name: str):
     for u in users:
         if u.name == name: return u
 
 # GOOD: explicit return type, explicit None check
+
 def find_user(name: str) -> User | None:
     for u in users:
         if u.name == name: return u
@@ -39,9 +43,11 @@ All project exceptions inherit from a project-level base exception. No bare `exc
 
 ```python
 # BAD
+
 raise Exception("user not found")
 
 # GOOD
+
 class AppError(Exception): ...
 class UserNotFoundError(AppError): ...
 raise UserNotFoundError(f"User {user_id} not found")
@@ -53,9 +59,11 @@ One async framework per project (`asyncio` default). Every `async def` must cont
 
 ```python
 # BAD
+
 async def get_name() -> str: return "alice"  # no await, should not be async
 
 # GOOD
+
 def get_name() -> str: return "alice"
 async def read_file(path: str) -> str: return await asyncio.to_thread(Path(path).read_text)
 ```
@@ -66,10 +74,12 @@ Use Pydantic models to validate all external input (API requests, config files, 
 
 ```python
 # BAD: trusting raw dict
+
 def handle_request(data: dict) -> None:
     name = data["name"]  # KeyError if missing, no type check
 
 # GOOD: Pydantic at boundary
+
 class CreateUserRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     email: EmailStr

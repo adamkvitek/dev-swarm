@@ -39,12 +39,6 @@ export function validateRepoPath(repoPath: unknown): string {
   return canonical;
 }
 
-/**
- * Validate a safe string for use in git branch names and commit messages.
- * Allows alphanumeric, hyphens, underscores, slashes, dots, spaces.
- */
-const SAFE_TEXT_RE = /^[a-zA-Z0-9\s\-_./,:;!?()[\]'"@#$%&+=<>{}|~^`\n]+$/;
-
 export function validateSafeText(value: unknown, fieldName: string, maxLength: number): string {
   if (typeof value !== "string") {
     throw new ValidationError(`${fieldName} must be a string`);

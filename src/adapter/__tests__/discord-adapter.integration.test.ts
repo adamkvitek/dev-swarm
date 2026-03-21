@@ -354,7 +354,7 @@ describe("Discord adapter integration: error recovery", () => {
 
     // Simulate an error during streaming
     const errorSession = {
-      send: vi.fn(async () => {
+      send: vi.fn(async (..._args: unknown[]) => {
         throw new Error("Connection lost during streaming");
       }),
       reset: vi.fn(),
@@ -395,7 +395,7 @@ describe("Discord adapter integration: error recovery", () => {
     const streamHandler = new DiscordStreamHandler(channel, { editIntervalMs: 100 });
 
     const timeoutSession = {
-      send: vi.fn(async () => {
+      send: vi.fn(async (..._args: unknown[]) => {
         throw new Error("Streaming CLI timed out after 300000ms");
       }),
     };

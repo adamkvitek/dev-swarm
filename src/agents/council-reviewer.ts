@@ -290,7 +290,7 @@ export class CouncilReviewer {
     // Extract synthesis reasoning
     let synthesisReasoning = "";
     try {
-      const raw = JSON.parse(result.stdout.match(/\{[\s\S]*\}/)![0]);
+      const raw = JSON.parse(result.stdout.match(/\{[\s\S]*\}/)?.at(0) ?? "{}");
       synthesisReasoning = raw.synthesisReasoning ?? "";
     } catch { /* ignore */ }
 

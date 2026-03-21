@@ -400,8 +400,8 @@ describe("StreamingClaudeSession", () => {
       expect(spawnArgs).toContain("--verbose");
 
       // Clean up: emit close to settle the promise
-      const fakeProc = mockedSpawn.mock.results[0].value as unknown as EventEmitter;
-      (fakeProc as unknown as ReturnType<typeof createFakeProc>["proc"]).stdout.emit(
+      const fakeProc = mockedSpawn.mock.results[0]!.value as unknown as EventEmitter;
+      (fakeProc as unknown as ReturnType<typeof createFakeProc>["proc"]).stdout!.emit(
         "data",
         Buffer.from(JSON.stringify({
           type: "result", subtype: "success", session_id: "s1",

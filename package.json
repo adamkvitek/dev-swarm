@@ -5,11 +5,11 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AKTech-ai/dev-swarm.git"
+    "url": "https://github.com/adamkvitek/dev-swarm.git"
   },
-  "homepage": "https://github.com/AKTech-ai/dev-swarm",
+  "homepage": "https://github.com/adamkvitek/dev-swarm",
   "bugs": {
-    "url": "https://github.com/AKTech-ai/dev-swarm/issues"
+    "url": "https://github.com/adamkvitek/dev-swarm/issues"
   },
   "keywords": [
     "ai",

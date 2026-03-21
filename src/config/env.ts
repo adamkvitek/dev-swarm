@@ -9,7 +9,7 @@ config();
  * Derive sensible defaults from the current machine's hardware.
  * OS-aware: handles macOS, Linux, and Windows memory reporting differences.
  */
-function detectHardware(): { cores: number; ramGb: number; defaultWorkers: number; defaultMemPct: number; os: string } {
+function detectHardware(): { cores: number; ramGb: number; defaultWorkers: number; defaultMemPct: number; defaultCeilingPct: number; os: string } {
   const cores = cpus().length;
   const ramGb = Math.round(totalmem() / (1024 * 1024 * 1024));
   // Workers: allow more concurrency — each worker is mostly I/O-bound
@@ -17,29 +17,24 @@ function detectHardware(): { cores: number; ramGb: number; defaultWorkers: numbe
   const defaultWorkers = Math.max(2, Math.round(cores * 0.75));
   const os = platform();
 
-  // Memory ceiling defaults per OS:
-  // - macOS (darwin): 92% — resource-guard uses vm_stat for accurate
-  //   available memory (free + inactive + purgeable), so the reported
-  //   usage is real. 92% gives enough headroom while avoiding false
-  //   positives that blocked workers at 85%.
-  // - Linux: 90% — MemAvailable from /proc/meminfo is accurate.
-  // - Windows (win32): 90% — os.freemem() reports actual available memory.
-  let defaultMemPct: number;
-  switch (os) {
-    case "darwin": defaultMemPct = 92; break;
-    case "linux":  defaultMemPct = 90; break;
-    case "win32":  defaultMemPct = 90; break;
-    default:       defaultMemPct = 90; break;
-  }
+  // Memory and CPU ceiling default: 92% across all platforms.
+  // resource-guard uses platform-aware memory detection so reported usage
+  // is accurate on each OS:
+  // - macOS (darwin): vm_stat (free + inactive + purgeable pages)
+  // - Linux: MemAvailable from /proc/meminfo
+  // - Windows (win32): os.freemem() (reports actual available memory)
+  // 92% gives enough headroom while avoiding false positives that blocked
+  // workers at the old 85% default.
+  const defaultMemPct = 92;
 
-  return { cores, ramGb, defaultWorkers, defaultMemPct, os };
+  return { cores, ramGb, defaultWorkers, defaultMemPct, defaultCeilingPct: defaultMemPct, os };
 }
 
 const hw = detectHardware();
 
 const envSchema = z.object({
-  // Required
-  DISCORD_BOT_TOKEN: z.string().min(1, "DISCORD_BOT_TOKEN is required"),
+  // Required for Discord mode only — headless mode (serve/dev-swarm) doesn't need it
+  DISCORD_BOT_TOKEN: z.string().default(""),
 
   // CLI paths (uses existing subscriptions)
   CLAUDE_CLI: z.string().default("claude"),
@@ -51,7 +46,7 @@ const envSchema = z.object({
   MAX_MESSAGE_AGE_MS: z.coerce.number().int().min(5_000).default(60_000), // Ignore messages older than 60s
   CLAUDE_RESPONSE_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(300_000), // 5 min default
   MEMORY_CEILING_PCT: z.coerce.number().int().min(50).max(98).default(hw.defaultMemPct),
-  CPU_CEILING_PCT: z.coerce.number().int().min(50).max(99).default(hw.defaultMemPct),
+  CPU_CEILING_PCT: z.coerce.number().int().min(50).max(99).default(hw.defaultCeilingPct),
 
   // Review loop config
   MAX_REVIEW_ITERATIONS: z.coerce.number().int().min(1).max(5).default(3),

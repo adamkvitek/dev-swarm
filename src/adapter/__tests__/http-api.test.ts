@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { cpus } from "node:os";
 import { HttpApi } from "../http-api.js";
 import type { JobManager, Job, JobStatus } from "../job-manager.js";
 import type { ResourceGuard, ResourceSnapshot } from "../resource-guard.js";
@@ -30,10 +31,14 @@ function createMockResourceGuard(): ResourceGuard {
       memoryUsedMb: 7200,
       memoryTotalMb: 16000,
       memoryAvailableMb: 8800,
+      cpuUsedPct: 30,
+      cpuCores: cpus().length,
       activeWorkers: 0,
       maxWorkers: 4,
       canSpawnMore: true,
       healthy: true,
+      memoryHealthy: true,
+      cpuHealthy: true,
       platform: "darwin",
     }),
     statusLine: () => "Memory: 7200MB / 16000MB (45%) | Workers: 0/4",

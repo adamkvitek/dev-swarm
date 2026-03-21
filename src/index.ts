@@ -15,6 +15,14 @@ async function main(): Promise<void> {
   logger.info("Loading configuration...");
   const env = loadEnv();
 
+  if (!env.DISCORD_BOT_TOKEN) {
+    logger.error(
+      "DISCORD_BOT_TOKEN is not set. Discord mode requires it.\n" +
+      "Set it in .env or use 'npm run dev-swarm' for headless mode.",
+    );
+    process.exit(1);
+  }
+
   // 1. Worktree manager — isolated git worktrees for parallel workers
   const worktreeManager = new WorktreeManager(env.WORKSPACE_DIR);
   await worktreeManager.initialize();

@@ -82,7 +82,8 @@ MCP Server (src/mcp/server.ts + src/mcp/tools.ts)
 
 ## Environment
 
-Copy `.env.example` to `.env`. Only `DISCORD_BOT_TOKEN` is required for Discord mode.
+Copy `.env.example` to `.env`. `DISCORD_BOT_TOKEN` is only required for Discord mode.
+Headless mode (`npm run serve` / `npm run dev-swarm`) works without it.
 Resource limits auto-detect from hardware. See `.env.example` for all options.
 
 ## Testing

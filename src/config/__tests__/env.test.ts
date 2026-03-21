@@ -15,13 +15,14 @@ describe("env schema", () => {
     process.env = originalEnv;
   });
 
-  it("should fail without DISCORD_BOT_TOKEN", async () => {
+  it("should succeed without DISCORD_BOT_TOKEN (headless mode)", async () => {
     delete process.env.DISCORD_BOT_TOKEN;
     const { loadEnv } = await import("../env.js");
-    expect(() => loadEnv()).toThrow("DISCORD_BOT_TOKEN");
+    const env = loadEnv();
+    expect(env.DISCORD_BOT_TOKEN).toBe("");
   });
 
-  it("should succeed with only DISCORD_BOT_TOKEN set", async () => {
+  it("should pass through DISCORD_BOT_TOKEN when set", async () => {
     process.env.DISCORD_BOT_TOKEN = "test-token-123";
     const { loadEnv } = await import("../env.js");
     const env = loadEnv();

@@ -62,11 +62,15 @@ export class HttpApi {
 
   /**
    * Per-channel rate limiting. Returns true if the request is allowed.
+   * Cleans up stale entries to prevent unbounded Map growth.
    */
   private checkRateLimit(channelId: string): boolean {
     const now = Date.now();
     const timestamps = this.rateLimits.get(channelId) ?? [];
     const recent = timestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+    if (recent.length === 0) {
+      this.rateLimits.delete(channelId);
+    }
     if (recent.length >= RATE_LIMIT_MAX_JOBS) {
       return false;
     }
@@ -214,7 +218,9 @@ export class HttpApi {
       // GET /jobs
       if (method === "GET" && path === "/jobs") {
         const channelId = url.searchParams.get("channelId") ?? undefined;
-        const status = (url.searchParams.get("status") as JobStatus) ?? undefined;
+        const rawStatus = url.searchParams.get("status") ?? undefined;
+        const validStatuses = new Set(["running", "completed", "failed", "cancelled", "queued"]);
+        const status = rawStatus && validStatuses.has(rawStatus) ? rawStatus as JobStatus : undefined;
         const jobs = this.jobManager.getJobs({ channelId, status });
         return sendJson(res, 200, {
           jobs: jobs.map((j) => ({

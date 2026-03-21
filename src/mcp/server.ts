@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
+import { execFile } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { TOOL_DEFINITIONS } from "./tools.js";
@@ -49,7 +52,7 @@ async function apiCall(
 }
 
 const server = new McpServer(
-  { name: "dev-swarm", version: "0.2.0" },
+  { name: "dev-swarm", version: "0.1.0" },
   { capabilities: { tools: {} } },
 );
 
@@ -179,6 +182,143 @@ server.tool(
     return {
       content: [{ type: "text" as const, text: JSON.stringify(data) }],
     };
+  },
+);
+
+// --- get_time (local) ---
+server.tool(
+  "get_time",
+  TOOL_DEFINITIONS.get_time.description,
+  TOOL_DEFINITIONS.get_time.inputSchema,
+  async (args) => {
+    const now = new Date();
+    let formatted: string;
+    try {
+      formatted = now.toLocaleString("en-US", {
+        timeZone: args.timezone ?? undefined,
+        dateStyle: "full",
+        timeStyle: "long",
+      });
+    } catch {
+      formatted = now.toISOString();
+    }
+    return {
+      content: [{ type: "text" as const, text: `${formatted}\nISO: ${now.toISOString()}` }],
+    };
+  },
+);
+
+// --- read_file (local, sandboxed) ---
+const BLOCKED_PREFIXES = ["/etc", "/var", "/proc", "/sys", "/dev", "/boot", "/sbin", "/usr"];
+
+server.tool(
+  "read_file",
+  TOOL_DEFINITIONS.read_file.description,
+  TOOL_DEFINITIONS.read_file.inputSchema,
+  async (args) => {
+    const filePath = resolve(args.path);
+
+    if (!isAbsolute(filePath)) {
+      return { content: [{ type: "text" as const, text: "Error: path must be absolute" }], isError: true };
+    }
+
+    for (const prefix of BLOCKED_PREFIXES) {
+      if (filePath === prefix || filePath.startsWith(prefix + "/")) {
+        return { content: [{ type: "text" as const, text: `Error: cannot read system directory: ${prefix}` }], isError: true };
+      }
+    }
+
+    try {
+      const info = await stat(filePath);
+      if (!info.isFile()) {
+        return { content: [{ type: "text" as const, text: "Error: path is not a file" }], isError: true };
+      }
+      if (info.size > 5 * 1024 * 1024) {
+        return { content: [{ type: "text" as const, text: "Error: file is larger than 5MB" }], isError: true };
+      }
+      const raw = await readFile(filePath, "utf-8");
+      const maxLines = args.max_lines ?? 500;
+      const lines = raw.split("\n");
+      const truncated = lines.length > maxLines;
+      const output = lines.slice(0, maxLines).join("\n");
+      const suffix = truncated ? `\n\n... (truncated: ${lines.length} total lines, showing first ${maxLines})` : "";
+      return { content: [{ type: "text" as const, text: output + suffix }] };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: "text" as const, text: `Error reading file: ${msg}` }], isError: true };
+    }
+  },
+);
+
+// --- run_command (local, allowlisted) ---
+const ALLOWED_COMMANDS = new Set([
+  "git", "ls", "cat", "wc", "head", "tail", "find", "tree", "npm", "date", "pwd", "which", "echo",
+]);
+
+function validateCommand(raw: string): { exe: string; args: string[] } | string {
+  const parts = raw.trim().split(/\s+/);
+  const exe = parts[0];
+  const args = parts.slice(1);
+
+  if (!exe || !ALLOWED_COMMANDS.has(exe)) {
+    return `Command '${exe}' is not in the allowlist. Allowed: ${[...ALLOWED_COMMANDS].join(", ")}`;
+  }
+
+  // npm: only allow safe subcommands
+  if (exe === "npm") {
+    const sub = args[0];
+    const safeNpmSubs = new Set(["test", "run", "ls", "outdated", "audit", "version"]);
+    if (!sub || !safeNpmSubs.has(sub)) {
+      return `npm subcommand '${sub}' is not allowed. Allowed: ${[...safeNpmSubs].join(", ")}`;
+    }
+  }
+
+  // Reject shell metacharacters that could enable injection
+  const dangerous = /[;&|`$(){}!<>\\]/;
+  for (const arg of args) {
+    if (dangerous.test(arg)) {
+      return `Argument '${arg}' contains shell metacharacters. For safety, arguments must not include: ; & | \` $ ( ) { } ! < > \\`;
+    }
+  }
+
+  return { exe, args };
+}
+
+server.tool(
+  "run_command",
+  TOOL_DEFINITIONS.run_command.description,
+  TOOL_DEFINITIONS.run_command.inputSchema,
+  async (args) => {
+    const parsed = validateCommand(args.command);
+    if (typeof parsed === "string") {
+      return { content: [{ type: "text" as const, text: `Error: ${parsed}` }], isError: true };
+    }
+
+    const cwd = args.cwd ? resolve(args.cwd) : undefined;
+    if (cwd) {
+      for (const prefix of BLOCKED_PREFIXES) {
+        if (cwd === prefix || cwd.startsWith(prefix + "/")) {
+          return { content: [{ type: "text" as const, text: `Error: cannot run in system directory: ${prefix}` }], isError: true };
+        }
+      }
+    }
+
+    return new Promise((resolvePromise) => {
+      execFile(parsed.exe, parsed.args, {
+        cwd,
+        timeout: 60_000,
+        maxBuffer: 2 * 1024 * 1024,
+      }, (err, stdout, stderr) => {
+        if (err) {
+          const code = (err as NodeJS.ErrnoException & { code?: number }).code;
+          const output = [stdout, stderr, `Exit code: ${code ?? "unknown"}`].filter(Boolean).join("\n");
+          resolvePromise({ content: [{ type: "text" as const, text: output || err.message }], isError: true });
+          return;
+        }
+        const output = [stdout, stderr].filter(Boolean).join("\n") || "(no output)";
+        resolvePromise({ content: [{ type: "text" as const, text: output }] });
+      });
+    });
   },
 );
 

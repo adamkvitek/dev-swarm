@@ -35,7 +35,7 @@ export class DiscordAdapter {
   private systemPrompt: string | null = null;
   private typingTimers = new Map<string, ReturnType<typeof setInterval>>();
   /** Channels where users have sent messages this session — resource warnings go here only */
-  private activeChannels = new Map<string, TextChannel>();
+  private activeChannels = new Map<string, { channel: TextChannel; lastActivity: number }>();
 
   constructor(env: Env, jobManager: JobManager, resources: ResourceGuard) {
     this.env = env;
@@ -102,6 +102,53 @@ export class DiscordAdapter {
     this.sessionManager.updateMcpConfigPath(path);
   }
 
+  /**
+   * Compact a channel's Claude session by sending a /compact command.
+   * This asks Claude to summarize the conversation context, reducing token usage.
+   */
+  private async compactSession(channel: TextChannel): Promise<void> {
+    if (!this.sessionManager.hasSession(channel.id)) {
+      await channel.send("No active session to compact.");
+      return;
+    }
+
+    const release = await this.mutex.acquire(channel.id);
+    const streamHandler = new DiscordStreamHandler(channel);
+
+    try {
+      this.startTyping(channel);
+      streamHandler.onFirstFlush = () => this.stopTyping(channel.id);
+
+      const session = this.sessionManager.getOrCreate(channel.id);
+      const result = await this.sessionLimiter(() =>
+        session.send(
+          "[SYSTEM: The user wants to compact this conversation. Summarize the key context and decisions so far in a brief, structured format. Then confirm the session has been compacted.]",
+          {
+            onTextDelta: (text) => streamHandler.appendText(text),
+            onToolUseStart: (name) => {
+              this.startTyping(channel);
+              streamHandler.showToolUse(name);
+            },
+            onToolUseEnd: () => streamHandler.clearToolUse(),
+          },
+          { timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS },
+        ),
+      );
+
+      await streamHandler.finalize();
+      if (!streamHandler.hasContent && result.text) {
+        await this.sendChunked(channel, result.text);
+      }
+    } catch (error) {
+      this.stopTyping(channel.id);
+      await streamHandler.finalize();
+      await channel.send("Failed to compact session. Try /clear to start fresh.").catch(() => {});
+    } finally {
+      this.stopTyping(channel.id);
+      release();
+    }
+  }
+
   private async handleMessage(message: Message): Promise<void> {
     if (message.author.bot) return;
     if (!message.mentions.has(this.client.user!)) return;
@@ -119,7 +166,20 @@ export class DiscordAdapter {
     if (!content) return;
 
     const channel = message.channel as TextChannel;
-    this.activeChannels.set(channel.id, channel);
+    this.activeChannels.set(channel.id, { channel, lastActivity: Date.now() });
+
+    // Handle session management commands before sending to Claude
+    const command = content.toLowerCase();
+    if (command === "/clear" || command === "clear") {
+      this.sessionManager.reset(channel.id);
+      await channel.send("Session cleared. Next message starts a fresh conversation.");
+      return;
+    }
+    if (command === "/compact" || command === "compact") {
+      await this.compactSession(channel);
+      return;
+    }
+
     log.adapter.info(
       { author: message.author.tag, channel: channel.name, preview: content.slice(0, 100) },
       "Incoming message",
@@ -203,6 +263,23 @@ export class DiscordAdapter {
   }
 
   /**
+   * Get channels with recent activity (within last 4 hours) and evict stale entries.
+   */
+  private getRecentChannels(): TextChannel[] {
+    const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours
+    const now = Date.now();
+    const channels: TextChannel[] = [];
+    for (const [id, entry] of this.activeChannels) {
+      if (now - entry.lastActivity > STALE_MS) {
+        this.activeChannels.delete(id);
+      } else {
+        channels.push(entry.channel);
+      }
+    }
+    return channels;
+  }
+
+  /**
    * Check for resource state changes and notify active channels.
    * Only channels where users have sent messages this session get notified.
    */
@@ -211,12 +288,13 @@ export class DiscordAdapter {
     const message = warning ?? recovery;
     if (!message) return;
 
+    const channels = this.getRecentChannels();
     log.adapter.info(
-      { warning: !!warning, recovery: !!recovery, activeChannels: this.activeChannels.size },
+      { warning: !!warning, recovery: !!recovery, activeChannels: channels.length },
       "Resource state changed, notifying active channels",
     );
 
-    for (const ch of this.activeChannels.values()) {
+    for (const ch of channels) {
       ch.send(message).catch((err) => {
         log.adapter.warn(
           { err: err instanceof Error ? err.message : String(err), channelId: ch.id },
@@ -233,14 +311,15 @@ export class DiscordAdapter {
    */
   private handleProactiveResourceChange(transition: { warning: string | null; recovery: string | null }): void {
     const message = transition.warning ?? transition.recovery;
-    if (!message || this.activeChannels.size === 0) return;
+    const channels = this.getRecentChannels();
+    if (!message || channels.length === 0) return;
 
     log.adapter.info(
-      { warning: !!transition.warning, recovery: !!transition.recovery, activeChannels: this.activeChannels.size },
+      { warning: !!transition.warning, recovery: !!transition.recovery, activeChannels: channels.length },
       "Proactive resource monitor triggered",
     );
 
-    for (const ch of this.activeChannels.values()) {
+    for (const ch of channels) {
       // Send user-facing notification
       ch.send(message).catch((err) => {
         log.adapter.warn(

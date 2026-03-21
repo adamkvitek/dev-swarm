@@ -27,6 +27,7 @@ An AI development team orchestrator. You give it a task and a repo — it coordi
 ## Modes
 
 ### Normal Mode (default)
+
 ```
 User → CTO (Claude) → Workers (Claude) → Council Review → APPROVE/REVISE
 ```
@@ -35,6 +36,7 @@ User → CTO (Claude) → Workers (Claude) → Council Review → APPROVE/REVISE
 - Good for standard development tasks
 
 ### Council Mode (opt-in, for critical tasks)
+
 ```
 User → CTO → Council Workers (Claude + Codex + Gemini) → Best picked → Council Review → APPROVE/REVISE
 ```
@@ -100,8 +102,8 @@ All settings auto-detect from hardware. Override in `.env`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MAX_CONCURRENT_WORKERS` | 50% of CPU cores | Max parallel workers |
-| `MEMORY_CEILING_PCT` | 85% (macOS) / 80% (Linux/Windows) | Memory limit |
+| `MAX_CONCURRENT_WORKERS` | 75% of CPU cores (min 2) | Max parallel workers |
+| `MEMORY_CEILING_PCT` | 92% | Memory limit |
 | `REVIEW_QUALITY_THRESHOLD` | 8 | Score needed to APPROVE (1-10) |
 | `WORKSPACE_DIR` | ~/dev/swarm-workspace | Worktree directory |
 | `LOG_LEVEL` | info | Pino log level |

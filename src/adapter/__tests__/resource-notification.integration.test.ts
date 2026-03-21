@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { cpus } from "node:os";
 import type { ResourceSnapshot } from "../resource-guard.js";
 
 /**
@@ -46,10 +47,14 @@ function createMockResourceGuard(initial?: Partial<ResourceSnapshot>): MockResou
     memoryUsedMb: 7200,
     memoryTotalMb: 16000,
     memoryAvailableMb: 8800,
+    cpuUsedPct: 30,
+    cpuCores: cpus().length,
     activeWorkers: 0,
     maxWorkers: 4,
     canSpawnMore: true,
     healthy: true,
+    memoryHealthy: true,
+    cpuHealthy: true,
     platform: "darwin",
     ...initial,
   };

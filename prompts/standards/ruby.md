@@ -8,11 +8,13 @@ Types are not optional in production Ruby. Use Sorbet (`sig` annotations) or RBS
 
 ```ruby
 # BAD: no type information
+
 def find_user(id)
   User.find(id)
 end
 
 # GOOD: Sorbet
+
 sig { params(id: String).returns(T.nilable(User)) }
 def find_user(id)
   User.find_by(id: id)
@@ -25,11 +27,13 @@ end
 
 ```ruby
 # BAD
+
 def method_missing(name, *args)
   name.to_s.start_with?("find_by_") ? where(name.to_s.sub("find_by_", "") => args.first).first : super
 end
 
 # GOOD
+
 %w[name email role].each do |field|
   define_method("find_by_#{field}") { |value| where(field => value).first }
 end
@@ -41,9 +45,11 @@ Use `public_send` instead of `send` to respect access control. `send` bypasses p
 
 ```ruby
 # BAD: bypasses access control
+
 user.send(:reset_password_token)
 
 # GOOD: respects visibility
+
 user.public_send(:email)
 ```
 
@@ -53,12 +59,14 @@ Extract business logic from ActiveRecord callbacks into service objects. Callbac
 
 ```ruby
 # BAD: business logic buried in callbacks
+
 class User < ApplicationRecord
   after_create :send_welcome_email
   after_create :provision_account
 end
 
 # GOOD: explicit service object, testable in isolation
+
 class CreateUser
   def call(params)
     user = User.create!(params)
@@ -75,6 +83,7 @@ Add `# frozen_string_literal: true` to every Ruby file. Prevents accidental muta
 
 ```ruby
 # frozen_string_literal: true
+
 name = "alice"
 full_name = "#{name} smith"  # new string, original unchanged
 ```
