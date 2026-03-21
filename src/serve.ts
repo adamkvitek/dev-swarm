@@ -62,6 +62,7 @@ async function main(): Promise<void> {
     env.MEMORY_CEILING_PCT,
     env.MAX_CONCURRENT_WORKERS,
     () => jobManager.getActiveWorkerCount(),
+    env.CPU_CEILING_PCT,
   );
 
   const existingToken = readExistingToken();

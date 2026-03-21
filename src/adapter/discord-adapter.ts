@@ -139,7 +139,11 @@ export class DiscordAdapter {
       const resourceSnap = this.resources.check();
       let prompt = `[${message.author.displayName}]: ${content}`;
       if (!resourceSnap.healthy || !resourceSnap.canSpawnMore) {
-        prompt += `\n\n[SYSTEM: Resources are constrained — memory at ${resourceSnap.memoryUsedPct}%. ` +
+        const issues: string[] = [];
+        if (!resourceSnap.memoryHealthy) issues.push(`memory at ${resourceSnap.memoryUsedPct}%`);
+        if (!resourceSnap.cpuHealthy) issues.push(`CPU at ${resourceSnap.cpuUsedPct}%`);
+        if (resourceSnap.activeWorkers >= resourceSnap.maxWorkers) issues.push("all worker slots in use");
+        prompt += `\n\n[SYSTEM: Resources are constrained — ${issues.join(", ")}. ` +
           `Do not spawn new workers. Respond to the user's message normally but if they ask for worker tasks, ` +
           `explain that worker spawning is paused until resources free up.]`;
       }

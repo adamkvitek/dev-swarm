@@ -26,11 +26,12 @@ async function main(): Promise<void> {
   const councilWorker = new CouncilWorkerAgent(env);
   const jobManager = new JobManager(env, workerAgent, reviewerAgent, worktreeManager, councilReviewer, councilWorker);
 
-  // 3. Resource guard — memory + worker capacity checks
+  // 3. Resource guard — memory + CPU + worker capacity checks
   const resources = new ResourceGuard(
     env.MEMORY_CEILING_PCT,
     env.MAX_CONCURRENT_WORKERS,
     () => jobManager.getActiveWorkerCount(),
+    env.CPU_CEILING_PCT,
   );
 
   // 4. HTTP API — bridge between MCP server and adapter

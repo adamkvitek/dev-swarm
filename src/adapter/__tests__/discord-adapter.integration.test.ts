@@ -123,7 +123,7 @@ vi.mock("node:os", () => ({
   freemem: vi.fn(() => 8 * 1024 * 1024 * 1024), // 8GB free
   totalmem: vi.fn(() => 16 * 1024 * 1024 * 1024), // 16GB total
   platform: vi.fn(() => "darwin"),
-  cpus: vi.fn(() => Array(8).fill({ model: "mock", speed: 2400 })),
+  cpus: vi.fn(() => Array.from({ length: 8 }, () => ({ model: "mock", speed: 2400, times: { user: 1000, nice: 0, sys: 500, idle: 8500, irq: 0 } }))),
   homedir: vi.fn(() => "/home/test"),
 }));
 

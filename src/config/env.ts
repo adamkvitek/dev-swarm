@@ -51,6 +51,7 @@ const envSchema = z.object({
   MAX_MESSAGE_AGE_MS: z.coerce.number().int().min(5_000).default(60_000), // Ignore messages older than 60s
   CLAUDE_RESPONSE_TIMEOUT_MS: z.coerce.number().int().min(30_000).default(300_000), // 5 min default
   MEMORY_CEILING_PCT: z.coerce.number().int().min(50).max(98).default(hw.defaultMemPct),
+  CPU_CEILING_PCT: z.coerce.number().int().min(50).max(99).default(85),
 
   // Review loop config
   MAX_REVIEW_ITERATIONS: z.coerce.number().int().min(1).max(5).default(3),
