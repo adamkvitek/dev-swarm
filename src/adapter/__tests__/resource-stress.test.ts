@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ResourceGuard } from "../resource-guard.js";
+import { cpus } from "node:os";
 
 // Mock os module to control memory values — same pattern as resource-guard.test.ts
 vi.mock("node:os", () => ({
@@ -363,6 +364,108 @@ describe("ResourceGuard — stress scenarios", () => {
 
       // With mocked os values, all 10 calls should produce the same string
       expect(lines.size).toBe(1);
+    });
+  });
+
+  describe("CPU monitoring under stress", () => {
+    // getCpuUsagePct() computes a delta between consecutive os.cpus() snapshots.
+    // Call pattern: constructor = 1 call, check/statusLine/etc = 2 calls each.
+    // Use mockReturnValueOnce to queue specific values for constructor vs check().
+    //
+    // CPU times are cumulative. For 90% CPU:
+    //   LOW→HIGH: busy 0→9000, total 10000→20000, delta = 9000/10000 = 90%.
+
+    const mockedCpus = vi.mocked(cpus);
+
+    function makeCpuTimes(user: number, sys: number, idle: number, cores = 8) {
+      return Array.from({ length: cores }, () => ({
+        model: "mock",
+        speed: 2400,
+        times: { user, nice: 0, sys, idle, irq: 0 },
+      }));
+    }
+
+    const LOW_CPU = () => makeCpuTimes(0, 0, 10000) as ReturnType<typeof cpus>;
+    const HIGH_CPU = () => makeCpuTimes(9000, 0, 11000) as ReturnType<typeof cpus>;
+    const DEFAULT_CPU = () => makeCpuTimes(1000, 500, 8500) as ReturnType<typeof cpus>;
+
+    beforeEach(() => {
+      mockedCpus.mockImplementation(DEFAULT_CPU);
+    });
+
+    afterEach(() => {
+      mockedCpus.mockImplementation(DEFAULT_CPU);
+    });
+
+    function queueHighCpu(): void {
+      mockedCpus
+        .mockReturnValueOnce(LOW_CPU())
+        .mockReturnValueOnce(HIGH_CPU())
+        .mockImplementation(HIGH_CPU);
+    }
+
+    it("should report CPU healthy with high ceiling", () => {
+      // CPU delta = 0% (constant mock), ceiling 90% → healthy
+      const guard = new ResourceGuard(80, 4, () => 0, 90);
+      const snap = guard.check();
+
+      expect(snap.cpuHealthy).toBe(true);
+      expect(snap.cpuUsedPct).toBe(0);
+    });
+
+    it("should report CPU unhealthy with low ceiling when CPU usage is high", () => {
+      queueHighCpu();
+
+      // CPU 90% > ceiling 10% → unhealthy
+      const guard = new ResourceGuard(80, 4, () => 0, 10);
+      const snap = guard.check();
+
+      expect(snap.cpuHealthy).toBe(false);
+      expect(snap.cpuUsedPct).toBe(90);
+    });
+
+    it("should report both CPU and memory constrained with low ceilings for both", () => {
+      queueHighCpu();
+
+      // Memory ~50% > ceiling 40% → unhealthy; CPU 90% > ceiling 50% → unhealthy
+      const guard = new ResourceGuard(40, 4, () => 0, 50);
+      // userFacingStatus() calls check() internally — this is the first check()
+      const status = guard.userFacingStatus();
+
+      expect(status).toContain("Memory usage is high");
+      expect(status).toContain("CPU usage is high");
+    });
+
+    it("should report only CPU constrained when memory is fine", () => {
+      queueHighCpu();
+
+      // Memory OK (80% ceiling, ~50% usage), CPU 90% > 50% ceiling
+      const guard = new ResourceGuard(80, 4, () => 0, 50);
+      const status = guard.userFacingStatus();
+
+      expect(status).toContain("CPU usage is high");
+      expect(status).not.toContain("Memory usage is high");
+    });
+
+    it("should report only memory constrained when CPU is fine", () => {
+      // CPU delta = 0% (constant mock), CPU ceiling 85% → OK
+      // Memory ~50% > ceiling 40% → NOT OK
+      const guard = new ResourceGuard(40, 4, () => 0, 85);
+      const status = guard.userFacingStatus();
+
+      expect(status).toContain("Memory usage is high");
+      expect(status).not.toContain("CPU usage is high");
+    });
+
+    it("should show CPU OVER LIMIT in statusLine when CPU exceeds ceiling", () => {
+      queueHighCpu();
+
+      const guard = new ResourceGuard(80, 4, () => 0, 50);
+      const status = guard.statusLine();
+
+      // CPU section should show [OVER LIMIT]
+      expect(status).toContain("CPU:");
+      expect(status).toMatch(/CPU:.*\[OVER LIMIT\]/);
     });
   });
 });
