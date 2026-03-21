@@ -5,7 +5,7 @@ import { loadEnv } from "./config/env.js";
 import { JobManager } from "./adapter/job-manager.js";
 import { HttpApi } from "./adapter/http-api.js";
 import { ResourceGuard } from "./adapter/resource-guard.js";
-import { generateMcpConfig } from "./adapter/mcp-config.js";
+import { generateMcpConfig, cleanupMcpConfig } from "./adapter/mcp-config.js";
 import { WorkerAgent } from "./agents/worker.js";
 import { ReviewerAgent } from "./agents/reviewer.js";
 import { CouncilReviewer } from "./agents/council-reviewer.js";
@@ -15,8 +15,17 @@ import { logger, log } from "./logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+let shutdownFn: ((signal: string) => Promise<void>) | null = null;
+
 process.on("unhandledRejection", (err) => {
   logger.fatal({ err }, "Unhandled rejection");
+  if (shutdownFn) { void shutdownFn("unhandledRejection"); return; }
+  process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  logger.fatal({ err }, "Uncaught exception");
+  if (shutdownFn) { void shutdownFn("uncaughtException"); return; }
   process.exit(1);
 });
 
@@ -111,12 +120,15 @@ async function main(): Promise<void> {
     jobManager.cancelAllJobs();
     await httpApi.stop();
     await worktreeManager.removeAll();
+    await cleanupMcpConfig();
     jobManager.destroy();
     process.exit(0);
   };
 
+  shutdownFn = shutdown;
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGHUP", () => void shutdown("SIGHUP")); // terminal closed
 }
 
 main().catch((err) => {

@@ -209,7 +209,7 @@ export class JobManager {
         // Use council reviewer if available, otherwise single reviewer
         const reviewer = this.councilReviewer ?? this.reviewerAgent;
         return reviewer.review(
-          workerJob.workerResults!,
+          workerJob.workerResults!, // validated on line 192: if (!workerJob?.workerResults)
           taskDescription,
           iteration,
           this.abortControllers.get(job.id)?.signal,
@@ -346,7 +346,7 @@ export class JobManager {
     isCouncil: boolean,
   ): void {
     job.status = "running";
-    const agent = isCouncil ? this.councilWorker! : this.workerAgent;
+    const agent = isCouncil ? this.councilWorker! : this.workerAgent; // councilWorker set in constructor when council models available
     const label = isCouncil
       ? `Council job ${job.id} completed (${job.subtasks.length} subtasks × 3 models)`
       : `Worker job ${job.id} completed (${job.subtasks.length} subtasks)`;
@@ -355,10 +355,10 @@ export class JobManager {
       job,
       () => agent.executeParallel(job.subtasks, {
         techStack,
-        repoPath: job.repoPath!,
+        repoPath: job.repoPath!, // set during createWorkerJob before this runs
         worktreeManager: this.worktreeManager,
         previousFeedback,
-        signal: this.abortControllers.get(job.id)!.signal,
+        signal: this.abortControllers.get(job.id)!.signal, // set in runWorkerJob before execute
       }),
       (results) => { job.workerResults = results; },
       label,
@@ -474,7 +474,7 @@ export class JobManager {
         job.channelId === reviewJob.channelId &&
         job.repoPath
       ) {
-        if (!best || job.completedAt! > best.completedAt!) {
+        if (!best || job.completedAt! > best.completedAt!) { // completedAt set when status === "completed"
           best = job;
         }
       }

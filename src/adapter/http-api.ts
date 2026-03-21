@@ -174,6 +174,15 @@ export class HttpApi {
           ? validateSafeText(body.previousFeedback, "previousFeedback", 10_000)
           : undefined;
 
+        // Same queue depth cap as worker jobs — prevents unbounded council job creation
+        const MAX_QUEUE_DEPTH = 10;
+        if (this.jobManager.getQueueDepth() >= MAX_QUEUE_DEPTH) {
+          return sendJson(res, 429, {
+            error: `Queue is full (${MAX_QUEUE_DEPTH} jobs waiting). Wait for running jobs to finish.`,
+            queue_depth: this.jobManager.getQueueDepth(),
+          });
+        }
+
         const result = this.jobManager.createCouncilJob(
           channelId,
           subtasks,

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { log } from "../logger.js";
 import type {
   StreamCallbacks,
@@ -93,6 +93,7 @@ export class StreamingClaudeSession {
       let stderr = "";
       let settled = false;
       let accumulatedText = "";
+      const MAX_ACCUMULATED_TEXT = 1_048_576; // 1MB — full text is in streamResult.result
       let streamResult: StreamResult | null = null;
       let firstDataTime: number | null = null;
       // Track which content block indices are tool_use blocks
@@ -158,7 +159,9 @@ export class StreamingClaudeSession {
           switch (event.type) {
             case "content_block_delta": {
               if (event.delta.type === "text_delta") {
-                accumulatedText += event.delta.text;
+                if (accumulatedText.length < MAX_ACCUMULATED_TEXT) {
+                  accumulatedText += event.delta.text;
+                }
                 callbacks.onTextDelta(event.delta.text);
               }
               break;

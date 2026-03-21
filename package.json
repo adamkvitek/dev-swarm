@@ -1,6 +1,6 @@
 {
   "name": "dev-swarm",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "AI dev team orchestrator — Claude, Codex, and Gemini build software together with parallel workers, cross-model review, and isolated git worktrees",
   "type": "module",
   "repository": {
@@ -29,7 +29,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/index.ts | pino-pretty",
+    "dev": "tsx src/dev-launcher.ts",
     "start": "node dist/index.js",
     "dev-swarm": "tsx src/dev-swarm.ts",
     "serve": "tsx src/serve.ts",

@@ -32,8 +32,8 @@ export class DiscordStreamHandler {
 
   // Current message being streamed to
   private currentMessage: Message | null = null;
-  // All finalized (full) messages sent so far
-  private sentMessages: Message[] = [];
+  // Count of finalized messages (for diagnostics, not retaining Message objects)
+  private sentMessageCount = 0;
 
   // Text buffer — what the current message should show
   private buffer = "";
@@ -201,15 +201,15 @@ export class DiscordStreamHandler {
     if (this.currentMessage) {
       try {
         await this.currentMessage.edit(chunk || "...");
-        this.sentMessages.push(this.currentMessage);
+        this.sentMessageCount++;
       } catch {
         // If edit fails, send as new message
         const msg = await this.sendWithRetry(chunk || "...");
-        if (msg) this.sentMessages.push(msg);
+        if (msg) this.sentMessageCount++;
       }
     } else if (chunk) {
       const msg = await this.sendWithRetry(chunk);
-      if (msg) this.sentMessages.push(msg);
+      if (msg) this.sentMessageCount++;
     }
 
     // Create new message for remaining content

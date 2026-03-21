@@ -3,7 +3,7 @@ import { DiscordAdapter } from "./adapter/discord-adapter.js";
 import { JobManager } from "./adapter/job-manager.js";
 import { HttpApi } from "./adapter/http-api.js";
 import { ResourceGuard } from "./adapter/resource-guard.js";
-import { generateMcpConfig } from "./adapter/mcp-config.js";
+import { generateMcpConfig, cleanupMcpConfig } from "./adapter/mcp-config.js";
 import { WorkerAgent } from "./agents/worker.js";
 import { ReviewerAgent } from "./agents/reviewer.js";
 import { CouncilReviewer } from "./agents/council-reviewer.js";
@@ -11,8 +11,18 @@ import { CouncilWorkerAgent } from "./agents/council-worker.js";
 import { WorktreeManager } from "./workspace/worktree-manager.js";
 import { logger, log } from "./logger.js";
 
+// Hoisted so fatal handlers can route through graceful shutdown once main() sets it
+let shutdownFn: ((signal: string) => Promise<void>) | null = null;
+
 process.on("unhandledRejection", (err) => {
   logger.fatal({ err }, "Unhandled rejection");
+  if (shutdownFn) { void shutdownFn("unhandledRejection"); return; }
+  process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  logger.fatal({ err }, "Uncaught exception");
+  if (shutdownFn) { void shutdownFn("uncaughtException"); return; }
   process.exit(1);
 });
 
@@ -84,14 +94,19 @@ async function main(): Promise<void> {
     await worktreeManager.removeAll();
     log.shutdown.info("Worktrees cleaned up");
 
-    // 5. Final cleanup
+    // 5. Remove mcp-config.json (contains session token)
+    await cleanupMcpConfig();
+
+    // 6. Final cleanup
     jobManager.destroy();
     log.shutdown.info("Shutdown complete");
     process.exit(0);
   };
 
+  shutdownFn = shutdown;
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGHUP", () => void shutdown("SIGHUP")); // terminal closed
 
   await adapter.start();
   logger.info("Dev Swarm is running. Claude is the bot with MCP tools — waiting for @mentions...");

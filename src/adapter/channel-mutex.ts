@@ -17,15 +17,22 @@ export class ChannelMutex {
    * concurrent callers cannot both read the same `prev` promise.
    */
   async acquire(channelId: string): Promise<() => void> {
-    let release!: () => void;
+    let release!: () => void; // assigned synchronously by Promise constructor
     const next = new Promise<void>((resolve) => {
       release = resolve;
     });
 
     const prev = this.locks.get(channelId) ?? Promise.resolve();
-    this.locks.set(channelId, prev.then(() => next));
+    const chain = prev.then(() => next);
+    this.locks.set(channelId, chain);
 
     await prev;
-    return release;
+    return () => {
+      release();
+      // Clean up if we're still the tail of the chain — prevents slow leak
+      if (this.locks.get(channelId) === chain) {
+        this.locks.delete(channelId);
+      }
+    };
   }
 }

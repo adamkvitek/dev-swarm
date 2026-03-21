@@ -1,6 +1,7 @@
 import {
   Client,
   GatewayIntentBits,
+  Options,
   Partials,
   type Message,
   type TextChannel,
@@ -53,6 +54,14 @@ export class DiscordAdapter {
         GatewayIntentBits.MessageContent,
       ],
       partials: [Partials.Message, Partials.Channel],
+      // Bound caches to prevent unbounded memory growth in long-running bots
+      makeCache: Options.cacheWithLimits({
+        MessageManager: 50,       // 50 messages per channel
+        GuildMemberManager: 200,
+      }),
+      sweepers: {
+        messages: { interval: 300, lifetime: 600 },  // sweep messages >10min old every 5min
+      },
     });
 
     this.client.on("ready", () => {
@@ -151,7 +160,7 @@ export class DiscordAdapter {
 
   private async handleMessage(message: Message): Promise<void> {
     if (message.author.bot) return;
-    if (!message.mentions.has(this.client.user!)) return;
+    if (!message.mentions.has(this.client.user!)) return; // safe: only reachable after 'ready' event
 
     const messageAge = Date.now() - message.createdTimestamp;
     if (messageAge > this.env.MAX_MESSAGE_AGE_MS) {
@@ -160,7 +169,7 @@ export class DiscordAdapter {
     }
 
     const content = message.content
-      .replace(`<@${this.client.user!.id}>`, "")
+      .replace(`<@${this.client.user!.id}>`, "") // safe: only reachable after 'ready' event
       .replace(/<@&\d+>/g, "")
       .trim();
     if (!content) return;

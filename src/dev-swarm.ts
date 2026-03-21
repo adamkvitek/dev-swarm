@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,7 +23,8 @@ async function main(): Promise<void> {
     resolve(__dirname, "serve.ts"),
   ], {
     cwd: ROOT,
-    stdio: ["ignore", "pipe", "inherit"],
+    stdio: ["ignore", "ignore", "inherit"],
+    detached: true, // own process group so we can kill entire tree
   });
 
   // 2. Wait for health check
@@ -38,7 +39,7 @@ async function main(): Promise<void> {
 
   if (!ready) {
     console.error("Error: server failed to start after 30s");
-    server.kill();
+    if (server.pid) try { process.kill(-server.pid, "SIGKILL"); } catch { /* */ }
     process.exit(1);
   }
 
@@ -63,25 +64,47 @@ async function main(): Promise<void> {
     stdio: "inherit",
   });
 
-  // 4. Cleanup on exit
+  // 4. Cleanup: either process dying kills the other
   claude.on("close", (code) => {
-    server.kill();
+    killTree(server);
     process.exit(code ?? 0);
   });
 
   claude.on("error", (err) => {
     console.error("Failed to launch Claude Code:", err.message);
     console.error("Make sure claude is installed: claude --version");
-    server.kill();
+    killTree(server);
     process.exit(1);
   });
 
+  server.on("close", (code) => {
+    if (code !== 0) {
+      console.error(`Server exited unexpectedly (code ${code}). Shutting down.`);
+      claude.kill("SIGTERM");
+      process.exit(1);
+    }
+  });
+
+  /** Kill an entire process group — sends signal to all descendants. */
+  function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
+    if (child.pid == null) return;
+    try { process.kill(-child.pid, signal); } catch { /* already exited */ }
+  }
+
+  function killAll(): void {
+    killTree(server, "SIGTERM");
+    claude.kill("SIGTERM");
+    // Escalate after 5s in case graceful shutdown hangs
+    setTimeout(() => {
+      killTree(server, "SIGKILL");
+      claude.kill("SIGKILL");
+    }, 5_000).unref();
+  }
+
   // Let Claude handle Ctrl+C — server cleans up when Claude exits
   process.on("SIGINT", () => {});
-  process.on("SIGTERM", () => {
-    claude.kill("SIGTERM");
-    server.kill("SIGTERM");
-  });
+  process.on("SIGTERM", () => killAll());
+  process.on("SIGHUP", () => killAll()); // terminal closed — kill everything
 }
 
 main().catch((err) => {

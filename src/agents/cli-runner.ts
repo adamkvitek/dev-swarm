@@ -76,8 +76,14 @@ export function runCli(
       options?.signal?.removeEventListener("abort", onAbort);
     }
 
+    const MAX_STDOUT = 10_485_760; // 10MB — workers can produce large output
     proc.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
+      if (stdout.length < MAX_STDOUT) {
+        stdout += data.toString();
+        if (stdout.length > MAX_STDOUT) {
+          stdout = stdout.slice(0, MAX_STDOUT) + "\n[stdout truncated at 10MB]";
+        }
+      }
     });
 
     const MAX_STDERR = 1_048_576; // 1MB

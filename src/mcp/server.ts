@@ -327,6 +327,22 @@ function validateCommand(raw: string): { exe: string; args: string[] } | string 
     }
   }
 
+  // Block path arguments to file-reading commands that point at sensitive dirs.
+  // This prevents `cat /etc/passwd` or `head ~/.ssh/id_rsa` from bypassing
+  // the read_file sandbox.
+  const FILE_READING_COMMANDS = new Set(["cat", "head", "tail", "ls", "find"]);
+  if (FILE_READING_COMMANDS.has(exe)) {
+    for (const arg of args) {
+      if (arg.startsWith("-")) continue; // skip flags
+      const resolved = resolve(arg);
+      for (const prefix of BLOCKED_PREFIXES) {
+        if (resolved === prefix || resolved.startsWith(prefix + "/")) {
+          return `Path '${arg}' is blocked. Cannot access system/sensitive directories.`;
+        }
+      }
+    }
+  }
+
   return { exe, args };
 }
 

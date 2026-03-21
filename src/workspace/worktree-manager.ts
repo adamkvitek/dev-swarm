@@ -208,17 +208,20 @@ export class WorktreeManager {
       throw new Error(`Failed to create branch ${featureBranch}: ${createResult.stderr}`);
     }
 
-    // Merge each worker branch
-    for (const branch of workerBranches) {
-      const mergeResult = await runCli(
-        "git",
-        ["-C", repoPath, "merge", branch, "--no-edit", "-m", `Merge ${branch}`],
-        { timeoutMs: 30_000 },
-      );
-      if (mergeResult.exitCode !== 0) {
-        // Abort the failed merge and throw
-        await runCli("git", ["-C", repoPath, "merge", "--abort"], { timeoutMs: 10_000 });
-        throw new Error(`Merge conflict merging ${branch}: ${mergeResult.stderr}`);
+    // Only merge if control plane validation passed — otherwise the branch
+    // exists with worker commits for human inspection, but nothing is merged.
+    if (validation.safe) {
+      for (const branch of workerBranches) {
+        const mergeResult = await runCli(
+          "git",
+          ["-C", repoPath, "merge", branch, "--no-edit", "-m", `Merge ${branch}`],
+          { timeoutMs: 30_000 },
+        );
+        if (mergeResult.exitCode !== 0) {
+          // Abort the failed merge and throw
+          await runCli("git", ["-C", repoPath, "merge", "--abort"], { timeoutMs: 10_000 });
+          throw new Error(`Merge conflict merging ${branch}: ${mergeResult.stderr}`);
+        }
       }
     }
 
@@ -342,7 +345,7 @@ export class WorktreeManager {
       try {
         return await fn();
       } finally {
-        resolveCurrent!();
+        resolveCurrent!(); // assigned synchronously by Promise constructor below
       }
     });
   }

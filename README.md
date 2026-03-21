@@ -158,7 +158,14 @@ prompts/
 
 ## Safety
 
-When agents target this repo's own codebase, four protection layers activate:
+Worker agents run with `--dangerously-skip-permissions` because they operate headlessly (no human to click "approve" on each tool call). This is mitigated by:
+
+- **Isolated git worktrees**: each worker gets its own copy. They can't conflict with each other or your working tree.
+- **Command allowlist**: the MCP server restricts `run_command` to a small set of binaries (`git`, `npm run test/lint/typecheck/build`, `cat`, `ls`, etc.). Git is further restricted to read-only subcommands.
+- **Path blocking**: `read_file` blocks system directories (`/etc`, `/var`, `~/.ssh`, `~/.aws`, `~/.gnupg`) and resolves symlinks before checking.
+- **Resource limits**: memory and CPU ceilings prevent runaway workers from exhausting the system.
+
+When agents target this repo's own codebase, additional protection layers activate:
 
 1. **Deterministic path validation**: blocks auto-merge of infrastructure files
 2. **Self-repo fingerprinting**: detects when workers target the bot itself

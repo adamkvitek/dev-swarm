@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { writeFile, unlink } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log } from "../logger.js";
@@ -50,8 +50,23 @@ export async function generateMcpConfig(
   };
 
   const configPath = resolve(projectRoot, "mcp-config.json");
-  await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+  await writeFile(configPath, JSON.stringify(config, null, 2), { encoding: "utf-8", mode: 0o600 });
 
   log.mcp.info({ configPath, apiHost: host, apiPort: port }, "MCP config written");
   return configPath;
+}
+
+/**
+ * Remove the generated mcp-config.json on shutdown.
+ * The file contains a session-scoped bearer token — no reason to leave it on disk.
+ */
+export async function cleanupMcpConfig(): Promise<void> {
+  const projectRoot = resolve(__dirname, "..", "..");
+  const configPath = resolve(projectRoot, "mcp-config.json");
+  try {
+    await unlink(configPath);
+    log.mcp.info("MCP config cleaned up");
+  } catch {
+    // File may not exist — that's fine
+  }
 }

@@ -65,7 +65,7 @@ MCP Server (src/mcp/server.ts + src/mcp/tools.ts)
 ## Code conventions
 
 - **TypeScript** with `strict: true` and `noUncheckedIndexedAccess: true`. No `any` — use `unknown` and narrow.
-- **Logging**: structured via pino — `log.adapter.info(...)`, `log.jobMgr.info(...)`. Never `console.log` in src/.
+- **Logging**: structured via pino — `log.adapter.info(...)`, `log.jobMgr.info(...)`. Never `console.log` in src/ except CLI launcher scripts (`serve.ts`, `dev-swarm.ts`) where human-readable terminal output is intentional.
 - **Validation**: Zod at system boundaries (env vars, API input). Trust internal types.
 - **Imports**: `.js` extensions required (NodeNext module resolution).
 - **Tests**: vitest, colocated in `__tests__/` directories. Playwright for e2e in `tests/e2e/`.
