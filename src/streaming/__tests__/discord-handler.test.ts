@@ -51,7 +51,7 @@ describe("DiscordStreamHandler", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect(channel.send).toHaveBeenCalledTimes(1);
-    expect(channel._sentMessages[0].content).toBe("Hello world");
+    expect(channel._sentMessages[0]!.content).toBe("Hello world");
   });
 
   it("should accumulate text between flushes", async () => {
@@ -65,7 +65,7 @@ describe("DiscordStreamHandler", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect(channel.send).toHaveBeenCalledTimes(1);
-    expect(channel._sentMessages[0].content).toBe("Hello world!");
+    expect(channel._sentMessages[0]!.content).toBe("Hello world!");
   });
 
   it("should edit existing message on subsequent flushes", async () => {
@@ -126,7 +126,7 @@ describe("DiscordStreamHandler", () => {
     handler.appendText("IGNORED");
     await vi.advanceTimersByTimeAsync(200);
 
-    expect(channel._sentMessages[0].content).toBe("Final text");
+    expect(channel._sentMessages[0]!.content).toBe("Final text");
     // Only one send, no edits after finalize
     expect(channel.send).toHaveBeenCalledTimes(1);
   });

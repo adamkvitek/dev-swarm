@@ -196,7 +196,7 @@ export class CouncilWorkerAgent {
     }
 
     if (implementations.length === 1) {
-      const only = implementations[0];
+      const only = implementations[0]!; // Length checked to be exactly 1
       return {
         subtaskId: subtask.id,
         implementations,
@@ -438,6 +438,9 @@ export class CouncilWorkerAgent {
     }
 
     const best = implementations[bestIdx];
+    if (!best) {
+      throw new Error(`Council pickBest: no implementation at index ${bestIdx}`);
+    }
     log.worker.info(
       { subtaskId: subtask.id, bestModel: best.model, reason: reasoning.slice(0, 100) },
       "Council: best implementation selected",

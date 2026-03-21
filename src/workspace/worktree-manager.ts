@@ -376,7 +376,7 @@ async function retryWithBackoff(fn: () => Promise<void>, label: string): Promise
         log.worktree.error({ err, label, attempts: attempt + 1 }, "Cleanup failed after retries");
         return; // Give up — don't crash the process over cleanup
       }
-      const delay = RETRY_DELAYS_MS[attempt];
+      const delay = RETRY_DELAYS_MS[attempt] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1] ?? 1000;
       log.worktree.warn({ label, attempt: attempt + 1, retryInSeconds: delay / 1000 }, "Cleanup attempt failed, retrying");
       await new Promise((r) => setTimeout(r, delay));
     }

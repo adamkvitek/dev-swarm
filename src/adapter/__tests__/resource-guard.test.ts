@@ -373,8 +373,8 @@ describe("ResourceGuard", () => {
       guard.startMonitoring((t) => transitions.push(t), 1000);
       vi.advanceTimersByTime(1000);
       expect(transitions).toHaveLength(1);
-      expect(transitions[0].warning).toContain("Memory usage is high");
-      expect(transitions[0].recovery).toBeNull();
+      expect(transitions[0]!.warning).toContain("Memory usage is high");
+      expect(transitions[0]!.recovery).toBeNull();
       guard.stopMonitoring();
     });
 
@@ -385,13 +385,13 @@ describe("ResourceGuard", () => {
       guard.startMonitoring((t) => transitions.push(t), 1000);
       vi.advanceTimersByTime(1000);
       expect(transitions).toHaveLength(1);
-      expect(transitions[0].warning).toContain("All worker slots are in use");
+      expect(transitions[0]!.warning).toContain("All worker slots are in use");
       vi.advanceTimersByTime(1000);
       expect(transitions).toHaveLength(1);
       workers = 0;
       vi.advanceTimersByTime(1000);
       expect(transitions).toHaveLength(2);
-      expect(transitions[1].recovery).toContain("Full capabilities restored");
+      expect(transitions[1]!.recovery).toContain("Full capabilities restored");
       guard.stopMonitoring();
     });
 
@@ -423,7 +423,7 @@ describe("ResourceGuard", () => {
       guard.startMonitoring((t) => transitions.push(t), 500);
       vi.advanceTimersByTime(500);
       expect(transitions).toHaveLength(1);
-      expect(transitions[0].warning).toContain("All worker slots are in use");
+      expect(transitions[0]!.warning).toContain("All worker slots are in use");
       guard.stopMonitoring();
     });
 
@@ -450,13 +450,13 @@ describe("ResourceGuard", () => {
       workers = 4;
       vi.advanceTimersByTime(1000);
       expect(transitions).toHaveLength(1);
-      expect(transitions[0].warning).toContain("All worker slots are in use");
+      expect(transitions[0]!.warning).toContain("All worker slots are in use");
       vi.advanceTimersByTime(1000);
       expect(transitions).toHaveLength(1);
       workers = 0;
       vi.advanceTimersByTime(1000);
       expect(transitions).toHaveLength(2);
-      expect(transitions[1].recovery).toContain("Full capabilities restored");
+      expect(transitions[1]!.recovery).toContain("Full capabilities restored");
       vi.advanceTimersByTime(2000);
       expect(transitions).toHaveLength(2);
       guard.stopMonitoring();

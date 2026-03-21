@@ -64,12 +64,12 @@ function getAvailableMemoryBytes(): number {
         if (!Number.isNaN(parsed) && parsed > 0) pageSize = parsed;
       } catch {
         const pageSizeMatch = vmstat.match(/page size of (\d+) bytes/);
-        if (pageSizeMatch) pageSize = parseInt(pageSizeMatch[1], 10);
+        if (pageSizeMatch?.[1]) pageSize = parseInt(pageSizeMatch[1], 10);
       }
 
       const getPages = (label: string): number => {
         const match = vmstat.match(new RegExp(`${label}:\\s+(\\d+)`));
-        return match ? parseInt(match[1], 10) : 0;
+        return match?.[1] ? parseInt(match[1], 10) : 0;
       };
 
       const free = getPages("Pages free");
@@ -87,7 +87,7 @@ function getAvailableMemoryBytes(): number {
     try {
       const meminfo = readFileSync("/proc/meminfo", "utf-8");
       const match = meminfo.match(/MemAvailable:\s+(\d+)\s+kB/);
-      if (match) {
+      if (match?.[1]) {
         return parseInt(match[1], 10) * 1024; // kB → bytes
       }
     } catch {

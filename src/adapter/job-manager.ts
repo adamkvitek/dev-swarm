@@ -319,6 +319,7 @@ export class JobManager {
     let started = 0;
     while (this.pendingQueue.length > 0) {
       const next = this.pendingQueue[0];
+      if (!next) break;
       const activeCount = this.getActiveWorkerCount();
       const needed = next.isCouncil ? next.job.subtasks.length * 3 : next.job.subtasks.length;
       const max = next.isCouncil ? this.env.MAX_CONCURRENT_WORKERS * 3 : this.env.MAX_CONCURRENT_WORKERS;

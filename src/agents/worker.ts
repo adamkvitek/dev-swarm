@@ -174,7 +174,8 @@ export class WorkerAgent {
     // Create all worktrees sequentially (avoids git lock conflicts)
     // Use Map keyed by subtask ID — avoids fragile array index coupling
     const worktreeMap = new Map<string, WorktreeInfo>();
-    const jobId = subtasks[0].id.split("-")[0] || subtasks[0].id;
+    const firstSubtask = subtasks[0]!; // Callers always pass non-empty array
+    const jobId = firstSubtask.id.split("-")[0] || firstSubtask.id;
     for (const subtask of subtasks) {
       const info = await context.worktreeManager.create(
         context.repoPath,

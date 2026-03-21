@@ -111,8 +111,8 @@ describe("validateSubtasks", () => {
   it("should accept valid subtasks", () => {
     const result = validateSubtasks([validSubtask]);
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe("task-1");
-    expect(result[0].title).toBe("Add auth");
+    expect(result[0]!.id).toBe("task-1");
+    expect(result[0]!.title).toBe("Add auth");
   });
 
   it("should accept multiple subtasks with dependencies", () => {
@@ -121,7 +121,7 @@ describe("validateSubtasks", () => {
       { id: "task-2", title: "Add tests", description: "Write tests for auth", dependencies: ["task-1"] },
     ]);
     expect(result).toHaveLength(2);
-    expect(result[1].dependencies).toEqual(["task-1"]);
+    expect(result[1]!.dependencies).toEqual(["task-1"]);
   });
 
   it("should reject non-array input", () => {

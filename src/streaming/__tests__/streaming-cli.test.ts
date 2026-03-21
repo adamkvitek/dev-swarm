@@ -396,7 +396,7 @@ describe("StreamingClaudeSession", () => {
       const session = new StreamingClaudeSession("claude");
       const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
 
-      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      const spawnArgs = mockedSpawn.mock.calls[0]![1] as string[];
       expect(spawnArgs).toContain("--verbose");
 
       // Clean up: emit close to settle the promise
@@ -421,7 +421,7 @@ describe("StreamingClaudeSession", () => {
       const session = new StreamingClaudeSession("claude");
       const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
 
-      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      const spawnArgs = mockedSpawn.mock.calls[0]![1] as string[];
       expect(spawnArgs).toContain("--print");
       expect(spawnArgs).toContain("--output-format");
       expect(spawnArgs[spawnArgs.indexOf("--output-format") + 1]).toBe("stream-json");
@@ -444,7 +444,7 @@ describe("StreamingClaudeSession", () => {
       const session = new StreamingClaudeSession("claude", ["--dangerously-skip-permissions"]);
       const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
 
-      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      const spawnArgs = mockedSpawn.mock.calls[0]![1] as string[];
       expect(spawnArgs).toContain("--dangerously-skip-permissions");
 
       stdout.emit("data", Buffer.from(JSON.stringify({
@@ -464,7 +464,7 @@ describe("StreamingClaudeSession", () => {
       const session = new StreamingClaudeSession("claude", [], undefined, "You are a bot");
       const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
 
-      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      const spawnArgs = mockedSpawn.mock.calls[0]![1] as string[];
       expect(spawnArgs).toContain("--append-system-prompt");
       expect(spawnArgs[spawnArgs.indexOf("--append-system-prompt") + 1]).toBe("You are a bot");
 
@@ -503,7 +503,7 @@ describe("StreamingClaudeSession", () => {
 
       const p2 = session.send("second", noopCallbacks(), { timeoutMs: 1000 });
 
-      const args2 = mockedSpawn.mock.calls[1][1] as string[];
+      const args2 = mockedSpawn.mock.calls[1]![1] as string[];
       expect(args2).toContain("--resume");
       expect(args2[args2.indexOf("--resume") + 1]).toBe("sess-abc");
       // System prompt should NOT be repeated on subsequent messages
@@ -525,7 +525,7 @@ describe("StreamingClaudeSession", () => {
       const session = new StreamingClaudeSession("claude", [], "/tmp/mcp.json");
       const promise = session.send("test", noopCallbacks(), { timeoutMs: 1000 });
 
-      const spawnArgs = mockedSpawn.mock.calls[0][1] as string[];
+      const spawnArgs = mockedSpawn.mock.calls[0]![1] as string[];
       expect(spawnArgs).toContain("--mcp-config");
       expect(spawnArgs[spawnArgs.indexOf("--mcp-config") + 1]).toBe("/tmp/mcp.json");
 

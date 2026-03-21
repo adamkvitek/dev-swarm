@@ -245,7 +245,7 @@ export class HttpApi {
       // GET /jobs/:id and GET /jobs/:id/result, POST /jobs/:id/cancel
       const jobMatch = path.match(/^\/jobs\/([a-f0-9-]+)(\/(?:result|cancel))?$/);
       if (jobMatch) {
-        const jobId = jobMatch[1];
+        const jobId = jobMatch[1] ?? "";
         const suffix = jobMatch[2];
 
         // POST /jobs/:id/cancel

@@ -213,7 +213,7 @@ describe("Job Queuing", () => {
       // The job completes, drainQueue is called automatically in the finally block.
       // But we also need to "complete" the running job by resolving its executeParallel.
       // Since the first job is running, resolve it.
-      workerCtrl.calls[0].resolve([{ subtaskId: "1", status: "completed", workDir: "/tmp", diff: "", files: [], summary: "" }]);
+      workerCtrl.calls[0]!.resolve([{ subtaskId: "1", status: "completed", workDir: "/tmp", diff: "", files: [], summary: "" }]);
 
       // drainQueue is called inside runJob's finally block. We need to flush microtasks.
       // With fake timers, we can use vi.runAllTimersAsync or just await a tick.
@@ -269,7 +269,7 @@ describe("Job Queuing", () => {
       expect(mgr.getQueueDepth()).toBe(2);
 
       // Resolve the first job's executeParallel — this triggers drainQueue in finally
-      workerCtrl.calls[0].resolve([
+      workerCtrl.calls[0]!.resolve([
         { subtaskId: "1", status: "completed", workDir: "/tmp", diff: "", files: [], summary: "" },
       ]);
 
@@ -320,7 +320,7 @@ describe("Job Queuing", () => {
       expect(mgr.getQueueDepth()).toBe(1);
 
       // Complete the running job — drainQueue fires in the finally block
-      workerCtrl.calls[0].resolve([
+      workerCtrl.calls[0]!.resolve([
         { subtaskId: "1", status: "completed", workDir: "/tmp", diff: "", files: [], summary: "" },
       ]);
 
@@ -350,7 +350,7 @@ describe("Job Queuing", () => {
       expect(queued.status).toBe("queued");
 
       // Fail the running job
-      workerCtrl.calls[0].reject(new Error("Worker crashed"));
+      workerCtrl.calls[0]!.reject(new Error("Worker crashed"));
 
       // Flush microtasks so runJob's catch/finally chain executes
       await flushMicrotasks();

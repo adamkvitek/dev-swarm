@@ -116,7 +116,7 @@ describe("Discord UX E2E Simulation", () => {
       handler.appendText("Hello ");
       await vi.advanceTimersByTimeAsync(100);
       expect(channel._sentMessages).toHaveLength(1);
-      expect(channel._sentMessages[0].content).toBe("Hello ");
+      expect(channel._sentMessages[0]!.content).toBe("Hello ");
 
       // Second token batch — edits existing message
       handler.appendText("world!");
@@ -197,9 +197,9 @@ describe("Discord UX E2E Simulation", () => {
       }
 
       // Verify the conversation progresses logically
-      expect(channel._sentMessages[0].content).toContain("TypeScript");
-      expect(channel._sentMessages[1].content).toContain("tsconfig");
-      expect(channel._sentMessages[2].content).toContain("configured");
+      expect(channel._sentMessages[0]!.content).toContain("TypeScript");
+      expect(channel._sentMessages[1]!.content).toContain("tsconfig");
+      expect(channel._sentMessages[2]!.content).toContain("configured");
     });
 
     it("should use separate handlers per message without cross-contamination", async () => {
@@ -223,8 +223,8 @@ describe("Discord UX E2E Simulation", () => {
 
       // Each handler created its own Discord message
       expect(channel._sentMessages).toHaveLength(2);
-      expect(channel._sentMessages[0].content).toBe("Response to message 1");
-      expect(channel._sentMessages[1].content).toBe("Response to message 2");
+      expect(channel._sentMessages[0]!.content).toBe("Response to message 1");
+      expect(channel._sentMessages[1]!.content).toBe("Response to message 2");
     });
   });
 
@@ -302,8 +302,8 @@ describe("Discord UX E2E Simulation", () => {
       expect(channel._editHistory.length).toBeGreaterThan(0);
 
       for (let i = 1; i < channel._editHistory.length; i++) {
-        expect(channel._editHistory[i].length).toBeGreaterThanOrEqual(
-          channel._editHistory[i - 1].length,
+        expect(channel._editHistory[i]!.length).toBeGreaterThanOrEqual(
+          channel._editHistory[i - 1]!.length,
         );
       }
 
@@ -399,8 +399,8 @@ describe("Discord UX E2E Simulation", () => {
       release1();
       release2();
 
-      expect(ch1._sentMessages[0].content).toBe("Response in channel 1");
-      expect(ch2._sentMessages[0].content).toBe("Response in channel 2");
+      expect(ch1._sentMessages[0]!.content).toBe("Response in channel 1");
+      expect(ch2._sentMessages[0]!.content).toBe("Response in channel 2");
     });
 
     it("should eventually answer both rapid messages (queued via mutex)", async () => {
@@ -453,8 +453,8 @@ describe("Discord UX E2E Simulation", () => {
       );
 
       expect(channel._sentMessages).toHaveLength(1);
-      expect(channel._sentMessages[0].content).toContain("Something went wrong");
-      expect(channel._sentMessages[0].content).toContain("Try again");
+      expect(channel._sentMessages[0]!.content).toContain("Something went wrong");
+      expect(channel._sentMessages[0]!.content).toContain("Try again");
     });
 
     it("should still work after an error — next message gets a response", async () => {
@@ -478,8 +478,8 @@ describe("Discord UX E2E Simulation", () => {
 
       // Both messages were sent
       expect(channel._sentMessages).toHaveLength(2);
-      expect(channel._sentMessages[0].content).toContain("Something went wrong");
-      expect(channel._sentMessages[1].content).toBe("Here is your answer.");
+      expect(channel._sentMessages[0]!.content).toContain("Something went wrong");
+      expect(channel._sentMessages[1]!.content).toBe("Here is your answer.");
     });
 
     it("should show timeout-specific error for long-running requests", async () => {
@@ -494,8 +494,8 @@ describe("Discord UX E2E Simulation", () => {
         "That took too long — try breaking it down into smaller requests."
       );
 
-      expect(channel._sentMessages[0].content).toContain("took too long");
-      expect(channel._sentMessages[0].content).toContain("smaller requests");
+      expect(channel._sentMessages[0]!.content).toContain("took too long");
+      expect(channel._sentMessages[0]!.content).toContain("smaller requests");
     });
 
     it("should not send further content after an error is shown", async () => {

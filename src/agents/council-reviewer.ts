@@ -126,8 +126,9 @@ export class CouncilReviewer {
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
-      const memberId = memberIds[i];
-      const label = ANONYMOUS_LABELS[i];
+      if (!result) continue;
+      const memberId = memberIds[i] ?? "unknown";
+      const label = ANONYMOUS_LABELS[i] ?? "?";
 
       if (result.status === "fulfilled" && result.value) {
         members.push({ ...result.value, memberId, anonymousLabel: label });
