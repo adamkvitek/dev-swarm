@@ -122,6 +122,15 @@ export class HttpApi {
           ? validateSafeText(body.previousFeedback, "previousFeedback", 10_000)
           : undefined;
 
+        // Reject if queue is already deep — prevents unbounded growth
+        const MAX_QUEUE_DEPTH = 10;
+        if (this.jobManager.getQueueDepth() >= MAX_QUEUE_DEPTH) {
+          return sendJson(res, 429, {
+            error: `Queue is full (${MAX_QUEUE_DEPTH} jobs waiting). Wait for running jobs to finish.`,
+            queue_depth: this.jobManager.getQueueDepth(),
+          });
+        }
+
         const job = this.jobManager.createWorkerJob(
           channelId,
           subtasks,
@@ -130,7 +139,8 @@ export class HttpApi {
           previousFeedback,
         );
 
-        return sendJson(res, 201, {
+        const status = job.status === "queued" ? 202 : 201; // 202 Accepted = queued
+        return sendJson(res, status, {
           job_id: job.id,
           status: job.status,
           queued: job.status === "queued",

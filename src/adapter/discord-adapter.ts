@@ -244,8 +244,15 @@ export class DiscordAdapter {
         );
       });
 
-      // On recovery: inject a system prompt into the Claude session
-      // so the CTO knows it can resume interrupted work
+      // On recovery: drain the job queue and inject a system prompt into
+      // the Claude session so the CTO knows it can resume interrupted work
+      if (transition.recovery) {
+        const started = this.jobManager.drainQueue();
+        if (started > 0) {
+          log.adapter.info({ started }, "Recovery: drained queued jobs");
+        }
+      }
+
       if (transition.recovery && this.sessionManager.hasSession(ch.id)) {
         const session = this.sessionManager.getOrCreate(ch.id);
         const streamHandler = new DiscordStreamHandler(ch);
