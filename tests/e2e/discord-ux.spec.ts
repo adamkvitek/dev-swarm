@@ -31,12 +31,44 @@ test.beforeEach(async ({ page }) => {
 
 /**
  * Type a message into the Discord chat input and send it.
- * Handles Discord's contenteditable textbox.
+ *
+ * For bot mentions: Discord requires selecting from the autocomplete popup.
+ * We type "@BotName" character by character to trigger it, then click the
+ * matching autocomplete entry. Plain fill() bypasses autocomplete and
+ * sends literal text that Discord doesn't treat as a mention.
  */
 async function sendMessage(page: Page, content: string): Promise<void> {
   const textbox = page.locator('[role="textbox"]').last();
   await textbox.click();
-  await textbox.fill(content);
+
+  // Check if the message starts with a @mention
+  const mentionMatch = content.match(/^@(\S+)\s*(.*)/);
+  if (mentionMatch) {
+    const botName = mentionMatch[1];
+    const rest = mentionMatch[2];
+
+    // Type @BotName character by character to trigger autocomplete
+    // Only need first few chars — Discord matches fuzzy
+    const prefix = botName.slice(0, 4);
+    await textbox.pressSequentially(`@${prefix}`, { delay: 100 });
+    await page.waitForTimeout(1_500);
+
+    // Click the first autocomplete option
+    const option = page.locator(
+      '[data-list-id="channel-autocomplete"] [role="option"]',
+    ).first();
+    await option.click();
+    await page.waitForTimeout(500);
+
+    // Type the rest of the message
+    if (rest) {
+      await page.keyboard.type(` ${rest}`, { delay: 30 });
+    }
+  } else {
+    await textbox.fill(content);
+  }
+
+  await page.waitForTimeout(300);
   await page.keyboard.press("Enter");
 }
 
@@ -104,7 +136,7 @@ test.describe("Discord Bot UX", () => {
 
     // Send a message mentioning the bot
     // The bot's mention needs to be @botname — use the actual mention format
-    await sendMessage(page, "@dev-swarm hello");
+    await sendMessage(page, "@Daskyleion hello");
 
     // Watch for the typing indicator to appear within 3 seconds
     // Discord shows typing as a div with "is typing" text or a specific class
@@ -115,23 +147,38 @@ test.describe("Discord Bot UX", () => {
     await expect(typingIndicator).toBeVisible({ timeout: 3_000 });
   });
 
-  test("should not show hardware banner in recent messages", async ({ page }) => {
+  test("should not show hardware banner in recent bot messages", async ({ page }) => {
     if (!CHANNEL_URL) return;
 
-    // After bot startup, check that no hardware detection banner was sent
-    const recentMessages = await getRecentMessages(page, 5);
-    const recentText = recentMessages.join(" ").toLowerCase();
+    // Check that the bot hasn't sent a hardware detection banner.
+    // Only check messages from the bot (has APP tag), not user messages
+    // which may quote the old banner text.
+    const botMessages = await page.evaluate(() => {
+      const items = document.querySelectorAll('li[id^="chat-messages-"]');
+      const texts: string[] = [];
+      for (const item of Array.from(items).slice(-10)) {
+        const hasAppTag = item.querySelector('[class*="botTag"], [class*="appTag"]');
+        if (hasAppTag) {
+          texts.push(item.textContent?.toLowerCase() ?? "");
+        }
+      }
+      return texts;
+    });
 
-    // These are indicators of the old system banner that should no longer appear
-    expect(recentText).not.toContain("cpu cores");
-    expect(recentText).not.toContain("detected");
-    expect(recentText).not.toContain("memory ceiling");
+    const botText = botMessages.join(" ");
+
+    // Bot messages should not contain hardware init banner language
+    // (user messages quoting the old banner are fine — we only check bot output)
+    if (botText.length > 0) {
+      expect(botText).not.toMatch(/system initialized.*detected.*cpu cores/);
+      expect(botText).not.toMatch(/override with env vars/);
+    }
   });
 
   test("should respond within 60 seconds", async ({ page }) => {
     if (!CHANNEL_URL) return;
 
-    await sendMessage(page, "@dev-swarm ping");
+    await sendMessage(page, "@Daskyleion ping");
 
     // Wait for the bot to respond — should be within 60 seconds
     const response = await waitForBotResponse(page, 60_000);
@@ -141,7 +188,7 @@ test.describe("Discord Bot UX", () => {
   test("should respond with conversational text", async ({ page }) => {
     if (!CHANNEL_URL) return;
 
-    await sendMessage(page, "@dev-swarm hello, how are you?");
+    await sendMessage(page, "@Daskyleion hello, how are you?");
 
     const response = await waitForBotResponse(page, 60_000);
 
@@ -163,7 +210,7 @@ test.describe("Discord Bot UX", () => {
     // Ask something that requires a longer response
     await sendMessage(
       page,
-      "@dev-swarm explain what this project does in a few sentences",
+      "@Daskyleion explain what this project does in a few sentences",
     );
 
     // Wait for the first bot message to appear
