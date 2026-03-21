@@ -80,8 +80,14 @@ export function runCli(
       stdout += data.toString();
     });
 
+    const MAX_STDERR = 1_048_576; // 1MB
     proc.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
+      if (stderr.length < MAX_STDERR) {
+        stderr += data.toString();
+        if (stderr.length > MAX_STDERR) {
+          stderr = stderr.slice(0, MAX_STDERR) + "\n[stderr truncated at 1MB]";
+        }
+      }
     });
 
     proc.on("close", (code) => {

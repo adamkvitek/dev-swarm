@@ -10,24 +10,22 @@ export class ChannelMutex {
 
   /**
    * Acquire the lock for a channel. Returns a release function.
-   * If the channel is already locked, waits for the previous message to finish.
+   * If the channel is already locked, waits for the previous holder to finish.
+   *
+   * Uses promise-chaining to avoid the TOCTOU race in a while/await/set pattern.
+   * `this.locks.set()` runs synchronously before the first `await`, so two
+   * concurrent callers cannot both read the same `prev` promise.
    */
   async acquire(channelId: string): Promise<() => void> {
-    // Wait for any existing lock on this channel
-    while (this.locks.has(channelId)) {
-      await this.locks.get(channelId);
-    }
-
-    // Create a new lock
     let release!: () => void;
-    const promise = new Promise<void>((resolve) => {
-      release = () => {
-        this.locks.delete(channelId);
-        resolve();
-      };
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
     });
 
-    this.locks.set(channelId, promise);
+    const prev = this.locks.get(channelId) ?? Promise.resolve();
+    this.locks.set(channelId, prev.then(() => next));
+
+    await prev;
     return release;
   }
 }

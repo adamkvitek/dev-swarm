@@ -56,9 +56,16 @@ function getAvailableMemoryBytes(): number {
   if (platform() === "darwin") {
     try {
       const vmstat = execSync("vm_stat", { encoding: "utf-8", timeout: 2000 });
-      // vm_stat reports in pages; page size is on the first line
-      const pageSizeMatch = vmstat.match(/page size of (\d+) bytes/);
-      const pageSize = pageSizeMatch ? parseInt(pageSizeMatch[1], 10) : 16384;
+      // Page size: prefer sysctl (reliable), fall back to vm_stat header, then 16384
+      let pageSize = 16384;
+      try {
+        const sysctlOut = execSync("sysctl -n hw.pagesize", { encoding: "utf-8", timeout: 2000 }).trim();
+        const parsed = parseInt(sysctlOut, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) pageSize = parsed;
+      } catch {
+        const pageSizeMatch = vmstat.match(/page size of (\d+) bytes/);
+        if (pageSizeMatch) pageSize = parseInt(pageSizeMatch[1], 10);
+      }
 
       const getPages = (label: string): number => {
         const match = vmstat.match(new RegExp(`${label}:\\s+(\\d+)`));
@@ -165,6 +172,8 @@ export class ResourceGuard {
         callback(transition);
       }
     }, intervalMs);
+    // Don't prevent Node.js from exiting if shutdown stalls
+    this.monitorTimer.unref();
   }
 
   stopMonitoring(): void {

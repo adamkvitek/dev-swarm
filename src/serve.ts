@@ -15,6 +15,11 @@ import { logger, log } from "./logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+process.on("unhandledRejection", (err) => {
+  logger.fatal({ err }, "Unhandled rejection");
+  process.exit(1);
+});
+
 /**
  * Read the existing API token from mcp-config.json if it exists.
  * This ensures that restarting serve.ts doesn't invalidate tokens

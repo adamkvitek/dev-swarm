@@ -283,6 +283,7 @@ export class JobManager {
   }
 
   cancelAllJobs(): void {
+    this.pendingQueue.length = 0;
     for (const [jobId, ac] of this.abortControllers) {
       ac.abort();
       const job = this.jobs.get(jobId);
@@ -296,6 +297,7 @@ export class JobManager {
 
   destroy(): void {
     this.cancelAllJobs();
+    this.pendingQueue.length = 0;
     clearInterval(this.evictionTimer);
     void this.worktreeManager.removeAll().catch((err) => {
       log.jobMgr.error({ err }, "Worktree cleanup on destroy failed");

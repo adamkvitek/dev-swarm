@@ -12,8 +12,11 @@ import { StreamingClaudeSession } from "./streaming-cli.js";
  * Drop-in replacement for the Map<string, ClaudeSession> pattern
  * in the existing discord-adapter.ts, but with streaming support.
  */
+const IDLE_EVICTION_MS = 4 * 60 * 60 * 1000; // 4 hours
+
 export class SessionManager {
   private sessions = new Map<string, StreamingClaudeSession>();
+  private lastUsed = new Map<string, number>();
   private claudeCli: string;
   private extraArgs: string[];
   private mcpConfigPath: string | null;
@@ -37,6 +40,8 @@ export class SessionManager {
    * automatically uses --resume with the stored session ID.
    */
   getOrCreate(channelId: string): StreamingClaudeSession {
+    this.evictIdle();
+
     let session = this.sessions.get(channelId);
     if (!session) {
       session = new StreamingClaudeSession(
@@ -48,7 +53,23 @@ export class SessionManager {
       this.sessions.set(channelId, session);
       log.adapter.info({ channelId }, "Created new streaming session");
     }
+    this.lastUsed.set(channelId, Date.now());
     return session;
+  }
+
+  /**
+   * Evict sessions that have been idle for more than 4 hours.
+   * Called lazily from getOrCreate() to avoid the need for a separate timer.
+   */
+  evictIdle(): void {
+    const now = Date.now();
+    for (const [channelId, timestamp] of this.lastUsed) {
+      if (now - timestamp > IDLE_EVICTION_MS) {
+        this.sessions.delete(channelId);
+        this.lastUsed.delete(channelId);
+        log.adapter.info({ channelId, idleMinutes: Math.round((now - timestamp) / 60_000) }, "Evicted idle session");
+      }
+    }
   }
 
   /**
@@ -57,6 +78,7 @@ export class SessionManager {
    */
   reset(channelId: string): void {
     this.sessions.delete(channelId);
+    this.lastUsed.delete(channelId);
     log.adapter.info({ channelId }, "Reset streaming session");
   }
 
@@ -124,6 +146,7 @@ export class SessionManager {
    */
   clear(): void {
     this.sessions.clear();
+    this.lastUsed.clear();
     log.adapter.info("All streaming sessions cleared");
   }
 }

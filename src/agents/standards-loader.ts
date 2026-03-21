@@ -57,11 +57,16 @@ const LANGUAGE_MAP: Record<string, string> = {
 
 /** Cache loaded files to avoid repeated disk reads */
 const cache = new Map<string, string>();
+const MAX_CACHE_SIZE = 200;
 
 async function loadFile(path: string): Promise<string | null> {
   if (cache.has(path)) return cache.get(path)!;
   try {
     const content = await readFile(path, "utf-8");
+    if (cache.size >= MAX_CACHE_SIZE) {
+      const firstKey = cache.keys().next().value;
+      if (firstKey) cache.delete(firstKey);
+    }
     cache.set(path, content);
     return content;
   } catch {

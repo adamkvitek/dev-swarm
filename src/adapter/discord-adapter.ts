@@ -338,40 +338,47 @@ export class DiscordAdapter {
       }
 
       if (transition.recovery && this.sessionManager.hasSession(ch.id)) {
-        const session = this.sessionManager.getOrCreate(ch.id);
-        const streamHandler = new DiscordStreamHandler(ch);
-        this.startTyping(ch);
-        streamHandler.onFirstFlush = () => this.stopTyping(ch.id);
+        // Acquire per-channel mutex to prevent racing with user messages
+        void this.mutex.acquire(ch.id).then(async (release) => {
+          const session = this.sessionManager.getOrCreate(ch.id);
+          const streamHandler = new DiscordStreamHandler(ch);
+          this.startTyping(ch);
+          streamHandler.onFirstFlush = () => this.stopTyping(ch.id);
 
-        const resumePrompt =
-          "[SYSTEM: Resources have recovered — full capabilities restored. " +
-          "If you were working on a task that was interrupted by resource constraints, " +
-          "resume where you left off. Check resources with check_resources to confirm, " +
-          "then continue. Do not start new work that wasn't already requested.]";
+          const resumePrompt =
+            "[SYSTEM: Resources have recovered — full capabilities restored. " +
+            "If you were working on a task that was interrupted by resource constraints, " +
+            "resume where you left off. Check resources with check_resources to confirm, " +
+            "then continue. Do not start new work that wasn't already requested.]";
 
-        this.sessionLimiter(() =>
-          session.send(resumePrompt, {
-            onTextDelta: (text) => streamHandler.appendText(text),
-            onToolUseStart: (name) => {
-              this.startTyping(ch);
-              streamHandler.showToolUse(name);
-            },
-            onToolUseEnd: () => streamHandler.clearToolUse(),
-          }, {
-            timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,
-          }),
-        ).then(async (result) => {
-          await streamHandler.finalize();
-          if (!streamHandler.hasContent && result.text) {
-            await this.sendChunked(ch, result.text);
+          try {
+            const result = await this.sessionLimiter(() =>
+              session.send(resumePrompt, {
+                onTextDelta: (text) => streamHandler.appendText(text),
+                onToolUseStart: (name) => {
+                  this.startTyping(ch);
+                  streamHandler.showToolUse(name);
+                },
+                onToolUseEnd: () => streamHandler.clearToolUse(),
+              }, {
+                timeoutMs: this.env.CLAUDE_RESPONSE_TIMEOUT_MS,
+              }),
+            );
+            await streamHandler.finalize();
+            if (!streamHandler.hasContent && result.text) {
+              await this.sendChunked(ch, result.text);
+            }
+          } catch (err) {
+            this.stopTyping(ch.id);
+            await streamHandler.finalize();
+            log.adapter.error(
+              { err: err instanceof Error ? err.message : String(err), channelId: ch.id },
+              "Failed to send resume prompt after recovery",
+            );
+          } finally {
+            this.stopTyping(ch.id);
+            release();
           }
-        }).catch(async (err) => {
-          this.stopTyping(ch.id);
-          await streamHandler.finalize();
-          log.adapter.error(
-            { err: err instanceof Error ? err.message : String(err), channelId: ch.id },
-            "Failed to send resume prompt after recovery",
-          );
         });
       }
     }
@@ -432,16 +439,29 @@ export class DiscordAdapter {
       return;
     }
 
-    // Split on newlines first, then by length
+    // Split on newlines first, then by length.
+    // If a single line exceeds maxLen, hard-split it at maxLen boundaries.
     const lines = text.split("\n");
     let chunk = "";
 
     for (const line of lines) {
-      if (chunk.length + line.length + 1 > maxLen) {
-        if (chunk) await this.sendWithRateLimit(channel, chunk);
-        chunk = line;
+      // Hard-split lines that exceed maxLen on their own
+      const segments: string[] = [];
+      if (line.length > maxLen) {
+        for (let i = 0; i < line.length; i += maxLen) {
+          segments.push(line.slice(i, i + maxLen));
+        }
       } else {
-        chunk += (chunk ? "\n" : "") + line;
+        segments.push(line);
+      }
+
+      for (const segment of segments) {
+        if (chunk.length + segment.length + 1 > maxLen) {
+          if (chunk) await this.sendWithRateLimit(channel, chunk);
+          chunk = segment;
+        } else {
+          chunk += (chunk ? "\n" : "") + segment;
+        }
       }
     }
 

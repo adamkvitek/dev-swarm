@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { runCli } from "./cli-runner.js";
 import { WORKER_SYSTEM_PROMPT, extractSummary } from "./shared.js";
 import { log } from "../logger.js";
@@ -147,13 +148,14 @@ export class CouncilWorkerAgent {
       result: PromiseSettledResult<WorkerResult>;
       model: string;
       runner: () => Promise<WorkerResult>;
+      worktreePath: string;
     }> = [
-      { result: claudeResult, model: "claude", runner: () => this.runClaude(subtask, claudeWorktree, prompt, systemPrompt, context.signal) },
-      { result: codexResult, model: "codex", runner: () => this.runCodex(subtask, codexWorktree, prompt, systemPrompt, context.signal) },
-      { result: geminiResult, model: "gemini", runner: () => this.runGemini(subtask, geminiWorktree, prompt, systemPrompt, context.signal) },
+      { result: claudeResult, model: "claude", runner: () => this.runClaude(subtask, claudeWorktree, prompt, systemPrompt, context.signal), worktreePath: claudeWorktree.path },
+      { result: codexResult, model: "codex", runner: () => this.runCodex(subtask, codexWorktree, prompt, systemPrompt, context.signal), worktreePath: codexWorktree.path },
+      { result: geminiResult, model: "gemini", runner: () => this.runGemini(subtask, geminiWorktree, prompt, systemPrompt, context.signal), worktreePath: geminiWorktree.path },
     ];
 
-    for (const { result, model, runner } of modelEntries) {
+    for (const { result, model, runner, worktreePath } of modelEntries) {
       if (result.status === "fulfilled" && result.value.status === "completed") {
         implementations.push({ ...result.value, model });
       } else {
@@ -167,7 +169,7 @@ export class CouncilWorkerAgent {
           "Council worker failed — scheduling retry",
         );
 
-        const retried = await this.retryWorker(model, runner, subtask.id, context.signal);
+        const retried = await this.retryWorker(model, runner, subtask.id, worktreePath, context.signal);
         if (retried) {
           implementations.push({ ...retried, model });
         }
@@ -219,6 +221,7 @@ export class CouncilWorkerAgent {
     model: string,
     runner: () => Promise<WorkerResult>,
     subtaskId: string,
+    worktreePath: string,
     signal?: AbortSignal,
   ): Promise<WorkerResult | null> {
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
@@ -229,6 +232,17 @@ export class CouncilWorkerAgent {
         { subtaskId, model, attempt: attempt + 1, delayMs },
         `Council retry: waiting ${delayMs}ms before attempt ${attempt + 1}`,
       );
+
+      // Reset worktree to clean state before retry
+      try {
+        execSync("git checkout -- .", { cwd: worktreePath, timeout: 15_000 });
+        execSync("git clean -fd", { cwd: worktreePath, timeout: 15_000 });
+      } catch (cleanErr) {
+        log.worker.warn(
+          { subtaskId, model, error: String(cleanErr) },
+          "Failed to clean worktree before retry",
+        );
+      }
 
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       if (signal?.aborted) return null;

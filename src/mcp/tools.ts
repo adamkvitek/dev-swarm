@@ -135,7 +135,7 @@ export const TOOL_DEFINITIONS = {
 
   run_command: {
     description:
-      "Run an allowlisted command. Only safe, read-only commands are permitted: git status, git log, git diff, git branch, ls, cat, wc, head, tail, find, tree, npm test, npm run typecheck, npm run lint.",
+      "Run an allowlisted command. Only safe, read-only commands are permitted. Allowed: ls, cat, wc, head, tail, find, tree, date, pwd, which, echo. Git (read-only): status, log, diff, branch, show, ls-files, rev-parse, merge-base, tag, stash list, remote -v, worktree list. npm: test, ls, outdated, audit, ci, install --dry-run, run typecheck, run lint, run build, run test.",
     inputSchema: {
       command: z.string().describe("The allowlisted command to run (e.g. 'git status')"),
       cwd: z.string().optional().describe("Working directory (absolute path)"),

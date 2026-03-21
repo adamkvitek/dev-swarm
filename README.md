@@ -92,6 +92,8 @@ npm start       # production (JSON logs)
 
 Not all CLIs are needed. The system works with fewer models available. Claude is the minimum.
 
+For detailed setup instructions (including Discord bot configuration), see [SETUP.md](SETUP.md).
+
 ## Configuration
 
 Defaults are auto-detected from your hardware. Override in `.env`:
@@ -134,7 +136,6 @@ src/
 │   ├── reviewer.ts         # Single-model reviewer
 │   ├── council-reviewer.ts # 3-stage council review
 │   ├── cto.ts              # CTO planning agent
-│   ├── claude-session.ts   # Persistent Claude CLI session
 │   ├── cli-runner.ts       # CLI subprocess runner
 │   ├── schemas.ts          # Zod schemas for CLI responses
 │   ├── shared.ts           # Shared prompts and utilities
@@ -147,12 +148,12 @@ src/
 ├── workspace/
 │   ├── worktree-manager.ts # Git worktree lifecycle
 │   └── control-plane.ts    # Self-modification safety
-├── streaming/              # Discord live token streaming (NDJSON)
-└── prompts/
-    ├── system.md           # CTO system prompt
-    ├── code-standards.md   # Universal coding standards
-    ├── review-checklist.md # 35-item review checklist
-    └── standards/          # Per-language standards (10 languages)
+└── streaming/              # Discord live token streaming (NDJSON)
+prompts/
+├── system.md               # CTO system prompt
+├── code-standards.md       # Universal coding standards
+├── review-checklist.md     # 35-item review checklist
+└── standards/              # Per-language standards (10 languages)
 ```
 
 ## Safety

@@ -3,18 +3,18 @@
 # manually reviewed and approved before merging.
 
 # Core infrastructure
-/src/adapter/          @maintainer
-/src/config/           @maintainer
-/src/index.ts          @maintainer
-/src/workspace/        @maintainer
-/src/mcp/              @maintainer
-/src/agents/           @maintainer
+/src/adapter/          @adamkvitek
+/src/config/           @adamkvitek
+/src/index.ts          @adamkvitek
+/src/workspace/        @adamkvitek
+/src/mcp/              @adamkvitek
+/src/agents/           @adamkvitek
 
 # Safety guardrails (modifying these is privilege escalation)
-/.claude/              @maintainer
-/CODEOWNERS            @maintainer
-/.github/              @maintainer
+/.claude/              @adamkvitek
+/CODEOWNERS            @adamkvitek
+/.github/              @adamkvitek
 
 # Dependencies and build config
-/package.json          @maintainer
-/tsconfig.json         @maintainer
+/package.json          @adamkvitek
+/tsconfig.json         @adamkvitek

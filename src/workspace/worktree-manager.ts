@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { runCli } from "../agents/cli-runner.js";
@@ -47,7 +47,46 @@ export class WorktreeManager {
 
   async initialize(): Promise<void> {
     await mkdir(this.workspaceDir, { recursive: true });
+    await this.cleanupStaleWorktrees();
     log.worktree.info({ path: this.workspaceDir }, "Workspace initialized");
+  }
+
+  /**
+   * Scan workspace for stale worker-* directories left by previous crashed runs.
+   * Cleans up git worktree bookkeeping and removes leftover directories.
+   */
+  private async cleanupStaleWorktrees(): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.workspaceDir);
+    } catch {
+      return; // Directory doesn't exist or isn't readable — nothing to clean
+    }
+
+    const stale = entries.filter((name) => name.startsWith("worker-"));
+    if (stale.length === 0) return;
+
+    log.worktree.info({ count: stale.length }, "Found stale worktree directories from previous run, cleaning up");
+
+    for (const dirName of stale) {
+      const dirPath = resolve(this.workspaceDir, dirName);
+
+      // Try to clean up git's worktree bookkeeping first
+      try {
+        await runCli("git", ["worktree", "remove", dirPath, "--force"], { timeoutMs: 15_000 });
+      } catch {
+        // git worktree remove may fail if the parent repo is gone — that's fine
+      }
+
+      // Remove the directory if it still exists
+      try {
+        await rm(dirPath, { recursive: true, force: true });
+      } catch {
+        log.worktree.warn({ path: dirPath }, "Failed to remove stale worktree directory");
+      }
+
+      log.worktree.info({ path: dirPath }, "Cleaned up stale worktree");
+    }
   }
 
   /**
@@ -94,6 +133,14 @@ export class WorktreeManager {
    * the merge is flagged as requiring manual approval.
    */
   async mergeToFeatureBranch(
+    repoPath: string,
+    jobId: string,
+    taskSummary: string,
+  ): Promise<MergeResult> {
+    return this.enqueue(() => this.doMergeToFeatureBranch(repoPath, jobId, taskSummary));
+  }
+
+  private async doMergeToFeatureBranch(
     repoPath: string,
     jobId: string,
     taskSummary: string,

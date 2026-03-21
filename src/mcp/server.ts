@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
+import os from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -209,17 +210,29 @@ server.tool(
 );
 
 // --- read_file (local, sandboxed) ---
-const BLOCKED_PREFIXES = ["/etc", "/var", "/proc", "/sys", "/dev", "/boot", "/sbin", "/usr"];
+const home = os.homedir();
+const BLOCKED_PREFIXES = [
+  "/etc", "/var", "/proc", "/sys", "/dev", "/boot", "/sbin", "/usr",
+  `${home}/.ssh`, `${home}/.aws`, `${home}/.gnupg`, `${home}/.config`,
+  `${home}/.netrc`, `${home}/.npmrc`,
+];
 
 server.tool(
   "read_file",
   TOOL_DEFINITIONS.read_file.description,
   TOOL_DEFINITIONS.read_file.inputSchema,
   async (args) => {
-    const filePath = resolve(args.path);
+    let filePath = resolve(args.path);
 
     if (!isAbsolute(filePath)) {
       return { content: [{ type: "text" as const, text: "Error: path must be absolute" }], isError: true };
+    }
+
+    // Resolve symlinks to prevent bypass of blocked prefixes
+    try {
+      filePath = await realpath(filePath);
+    } catch {
+      // realpath throws if file doesn't exist — let the stat check below handle that
     }
 
     for (const prefix of BLOCKED_PREFIXES) {
@@ -264,12 +277,45 @@ function validateCommand(raw: string): { exe: string; args: string[] } | string 
     return `Command '${exe}' is not in the allowlist. Allowed: ${[...ALLOWED_COMMANDS].join(", ")}`;
   }
 
+  // git: only allow read-only subcommands
+  if (exe === "git") {
+    const sub = args[0];
+    const safeGitSubs = new Set([
+      "status", "log", "diff", "branch", "show", "ls-files",
+      "rev-parse", "merge-base", "tag", "stash", "remote", "worktree",
+    ]);
+    if (!sub || !safeGitSubs.has(sub)) {
+      return `git subcommand '${sub}' is not allowed. Allowed: ${[...safeGitSubs].join(", ")}`;
+    }
+    // Further restrict multi-word subcommands
+    if (sub === "stash" && args[1] !== "list") {
+      return "Only 'git stash list' is allowed";
+    }
+    if (sub === "remote" && args[1] !== "-v") {
+      return "Only 'git remote -v' is allowed";
+    }
+    if (sub === "worktree" && args[1] !== "list") {
+      return "Only 'git worktree list' is allowed";
+    }
+  }
+
   // npm: only allow safe subcommands
   if (exe === "npm") {
     const sub = args[0];
-    const safeNpmSubs = new Set(["test", "run", "ls", "outdated", "audit", "version"]);
+    const safeNpmSubs = new Set(["test", "ls", "outdated", "audit", "ci"]);
+    const safeNpmRunScripts = new Set(["typecheck", "lint", "build", "test"]);
     if (!sub || !safeNpmSubs.has(sub)) {
-      return `npm subcommand '${sub}' is not allowed. Allowed: ${[...safeNpmSubs].join(", ")}`;
+      // Allow "npm run <script>" only for allowlisted scripts
+      if (sub === "run") {
+        const script = args[1];
+        if (!script || !safeNpmRunScripts.has(script)) {
+          return `npm run script '${script}' is not allowed. Allowed: npm run ${[...safeNpmRunScripts].join(", npm run ")}`;
+        }
+      } else if (sub === "install" && args[1] === "--dry-run") {
+        // npm install --dry-run is safe
+      } else {
+        return `npm subcommand '${sub}' is not allowed. Allowed: ${[...safeNpmSubs].join(", ")}, run [${[...safeNpmRunScripts].join("|")}], install --dry-run`;
+      }
     }
   }
 

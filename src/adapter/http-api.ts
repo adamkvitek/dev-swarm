@@ -202,6 +202,14 @@ export class HttpApi {
           });
         }
 
+        validateSafeText(taskDescription, "taskDescription", 10_000);
+
+        if (typeof iteration !== "number" || !Number.isInteger(iteration) || iteration < 1 || iteration > 10) {
+          return sendJson(res, 400, {
+            error: "iteration must be a positive integer between 1 and 10",
+          });
+        }
+
         const result = this.jobManager.createReviewJob(
           channelId,
           workerJobId,
@@ -327,7 +335,11 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
     req.on("end", () => {
       try {
         const text = Buffer.concat(chunks).toString("utf-8");
-        resolve(text ? JSON.parse(text) : {});
+        const parsed: unknown = text ? JSON.parse(text) : {};
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          throw new Error("Expected JSON object in request body");
+        }
+        resolve(parsed as Record<string, unknown>);
       } catch (err) {
         reject(new Error(`Invalid JSON body: ${err instanceof Error ? err.message : err}`));
       }

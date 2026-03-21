@@ -11,6 +11,11 @@ import { CouncilWorkerAgent } from "./agents/council-worker.js";
 import { WorktreeManager } from "./workspace/worktree-manager.js";
 import { logger, log } from "./logger.js";
 
+process.on("unhandledRejection", (err) => {
+  logger.fatal({ err }, "Unhandled rejection");
+  process.exit(1);
+});
+
 async function main(): Promise<void> {
   logger.info("Loading configuration...");
   const env = loadEnv();
