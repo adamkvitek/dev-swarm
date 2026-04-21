@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+dist/
+build/
+
+# .NET build artifacts
+**/bin/
+**/obj/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Generated at runtime
+mcp-config.json
+
+# Playwright
+tests/e2e/.auth/
+test-results/
+playwright-report/
+
+# Claude Code local data
+.claude/settings.local.json
+.claude/worktrees/
+.claude/projects/
+.claude/phases/
