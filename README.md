@@ -71,13 +71,14 @@ If the review says REVISE, workers get the feedback and try again. If APPROVE, c
 npm run dev-swarm
 ```
 
-**Discord**: Team collaboration. Claude responds to @mentions with live-streaming responses.
+**Discord**: Team collaboration. Claude responds in DMs without a mention, or in server channels when `@mentioned`.
 
 ```bash
 # Set DISCORD_BOT_TOKEN in .env first
 
-npm run dev     # development (pretty logs)
-npm start       # production (JSON logs)
+npm run dev     # development mode, pretty logs
+# or
+npm start       # production mode, JSON logs
 ```
 
 ## Prerequisites
@@ -177,8 +178,8 @@ When agents target this repo's own codebase, additional protection layers activa
 | Script | Description |
 |--------|-------------|
 | `npm run dev-swarm` | Headless mode (server + Claude Code) |
-| `npm run dev` | Discord mode, human-readable logs |
-| `npm start` | Discord mode, production JSON logs |
+| `npm run dev` | Discord mode in development; pretty logs; use instead of `npm start` |
+| `npm start` | Discord mode in production; JSON logs; use instead of `npm run dev` |
 | `npm run build` | Compile TypeScript |
 | `npm test` | Run tests (vitest) |
 | `npm run typecheck` | Type check |

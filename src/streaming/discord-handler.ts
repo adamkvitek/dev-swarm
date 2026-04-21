@@ -1,9 +1,15 @@
-import type { TextChannel, Message } from "discord.js";
+import type { Message } from "discord.js";
 import { log } from "../logger.js";
 
 const DISCORD_MAX_LENGTH = 1990; // Leave margin below 2000
 const DEFAULT_EDIT_INTERVAL_MS = 1500; // ~3 edits per 5s, well under Discord's 5/5s limit
 const TOOL_USE_PREFIX = "\n> *Using tool:";
+
+export interface DiscordWritableChannel {
+  id: string;
+  send(text: string): Promise<Message>;
+  sendTyping(): Promise<unknown>;
+}
 
 /**
  * Manages streaming text to a Discord channel.
@@ -27,7 +33,7 @@ const TOOL_USE_PREFIX = "\n> *Using tool:";
  *   await handler.finalize();
  */
 export class DiscordStreamHandler {
-  private channel: TextChannel;
+  private channel: DiscordWritableChannel;
   private editIntervalMs: number;
 
   // Current message being streamed to
@@ -54,7 +60,7 @@ export class DiscordStreamHandler {
    */
   onFirstFlush: (() => void) | null = null;
 
-  constructor(channel: TextChannel, options?: { editIntervalMs?: number }) {
+  constructor(channel: DiscordWritableChannel, options?: { editIntervalMs?: number }) {
     this.channel = channel;
     this.editIntervalMs = options?.editIntervalMs ?? DEFAULT_EDIT_INTERVAL_MS;
   }

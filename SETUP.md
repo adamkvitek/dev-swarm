@@ -48,13 +48,19 @@ That's the only required value. Everything else auto-detects from your hardware.
 ### Step 3: Run
 
 ```bash
-npm run dev    # development (human-readable logs)
-npm start      # production (JSON logs)
+npm run dev    # development mode, human-readable logs
+# or
+npm start      # production mode, JSON logs
 ```
+
+Run one of those commands, not both.
 
 ### Step 4: Use
 
-@mention the bot in Discord:
+Use the bot in Discord:
+
+- In a DM with the bot, just type normally.
+- In a server channel, @mention the bot.
 
 ```
 @bot Review /Users/adam/projects/my-app for security issues. Use TypeScript standards.

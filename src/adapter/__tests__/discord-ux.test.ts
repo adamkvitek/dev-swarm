@@ -559,6 +559,17 @@ describe("Discord UX E2E Simulation", () => {
       expect(processed).not.toContain("<@&");
     });
 
+    it("should strip nickname-style mentions from the content", () => {
+      const botUserId = "123456789";
+      const rawContent = `<@!${botUserId}> help me from mobile`;
+      const processed = rawContent
+        .replace(new RegExp(`<@!?${botUserId}>`, "g"), "")
+        .replace(/<@&\d+>/g, "")
+        .trim();
+
+      expect(processed).toBe("help me from mobile");
+    });
+
     it("should return empty string when message is only the mention", () => {
       const botUserId = "123456789";
       const rawContent = `<@${botUserId}>`;
@@ -580,6 +591,13 @@ describe("Discord UX E2E Simulation", () => {
         .trim();
 
       expect(processed).toBe("run workers on /Users/adam/projects/my-app with 3 subtasks");
+    });
+
+    it("should preserve DM content without requiring a mention", () => {
+      const rawContent = "help me review this repo from my phone";
+      const processed = rawContent.trim();
+
+      expect(processed).toBe("help me review this repo from my phone");
     });
   });
 

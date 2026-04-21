@@ -4,11 +4,11 @@ import {
   Options,
   Partials,
   type Message,
-  type TextChannel,
 } from "discord.js";
 import { readFile } from "node:fs/promises";
 import pLimit from "p-limit";
 import { SessionManager, DiscordStreamHandler } from "../streaming/index.js";
+import type { DiscordWritableChannel } from "../streaming/discord-handler.js";
 import { ChannelMutex } from "./channel-mutex.js";
 import { ResourceGuard } from "./resource-guard.js";
 import { log } from "../logger.js";
@@ -36,7 +36,7 @@ export class DiscordAdapter {
   private systemPrompt: string | null = null;
   private typingTimers = new Map<string, ReturnType<typeof setInterval>>();
   /** Channels where users have sent messages this session — resource warnings go here only */
-  private activeChannels = new Map<string, { channel: TextChannel; lastActivity: number }>();
+  private activeChannels = new Map<string, { channel: DiscordWritableChannel; lastActivity: number }>();
 
   constructor(env: Env, jobManager: JobManager, resources: ResourceGuard) {
     this.env = env;
@@ -51,6 +51,7 @@ export class DiscordAdapter {
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent,
       ],
       partials: [Partials.Message, Partials.Channel],
@@ -64,7 +65,7 @@ export class DiscordAdapter {
       },
     });
 
-    this.client.on("ready", () => {
+    this.client.on("clientReady", () => {
       log.adapter.info({ tag: this.client.user?.tag }, "Bot logged in");
       for (const guild of this.client.guilds.cache.values()) {
         log.adapter.info({ guild: guild.name, guildId: guild.id }, "Connected to guild");
@@ -115,7 +116,7 @@ export class DiscordAdapter {
    * Compact a channel's Claude session by sending a /compact command.
    * This asks Claude to summarize the conversation context, reducing token usage.
    */
-  private async compactSession(channel: TextChannel): Promise<void> {
+  private async compactSession(channel: DiscordWritableChannel): Promise<void> {
     if (!this.sessionManager.hasSession(channel.id)) {
       await channel.send("No active session to compact.");
       return;
@@ -160,7 +161,8 @@ export class DiscordAdapter {
 
   private async handleMessage(message: Message): Promise<void> {
     if (message.author.bot) return;
-    if (!message.mentions.has(this.client.user!)) return; // safe: only reachable after 'ready' event
+    const isDm = message.channel.isDMBased() && !message.inGuild();
+    if (!isDm && !message.mentions.has(this.client.user!)) return; // safe: only reachable after 'clientReady' event
 
     const messageAge = Date.now() - message.createdTimestamp;
     if (messageAge > this.env.MAX_MESSAGE_AGE_MS) {
@@ -168,13 +170,15 @@ export class DiscordAdapter {
       return;
     }
 
-    const content = message.content
-      .replace(`<@${this.client.user!.id}>`, "") // safe: only reachable after 'ready' event
-      .replace(/<@&\d+>/g, "")
-      .trim();
+    const content = isDm
+      ? message.content.trim()
+      : message.content
+        .replace(new RegExp(`<@!?${this.client.user!.id}>`, "g"), "") // safe: only reachable after 'clientReady' event
+        .replace(/<@&\d+>/g, "")
+        .trim();
     if (!content) return;
 
-    const channel = message.channel as TextChannel;
+    const channel = message.channel as unknown as DiscordWritableChannel;
     this.activeChannels.set(channel.id, { channel, lastActivity: Date.now() });
 
     // Handle session management commands before sending to Claude
@@ -190,7 +194,7 @@ export class DiscordAdapter {
     }
 
     log.adapter.info(
-      { author: message.author.tag, channel: channel.name, preview: content.slice(0, 100) },
+      { author: message.author.tag, channel: message.channel.isDMBased() ? "dm" : message.channel.id, preview: content.slice(0, 100) },
       "Incoming message",
     );
 
@@ -274,10 +278,10 @@ export class DiscordAdapter {
   /**
    * Get channels with recent activity (within last 4 hours) and evict stale entries.
    */
-  private getRecentChannels(): TextChannel[] {
+  private getRecentChannels(): DiscordWritableChannel[] {
     const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours
     const now = Date.now();
-    const channels: TextChannel[] = [];
+    const channels: DiscordWritableChannel[] = [];
     for (const [id, entry] of this.activeChannels) {
       if (now - entry.lastActivity > STALE_MS) {
         this.activeChannels.delete(id);
@@ -397,7 +401,7 @@ export class DiscordAdapter {
    * Keep Discord's "typing..." indicator alive by re-sending it every 8s.
    * Discord's typing indicator expires after ~10s, so 8s keeps it seamless.
    */
-  private startTyping(channel: TextChannel): void {
+  private startTyping(channel: DiscordWritableChannel): void {
     this.stopTyping(channel.id);
     channel.sendTyping().catch(() => {});
     const timer = setInterval(() => {
@@ -440,7 +444,7 @@ export class DiscordAdapter {
    * Send a message to Discord, splitting into chunks if it exceeds the 2000 char limit.
    * Handles Discord 429 rate limits with automatic retry + backoff.
    */
-  private async sendChunked(channel: TextChannel, text: string): Promise<void> {
+  private async sendChunked(channel: DiscordWritableChannel, text: string): Promise<void> {
     const maxLen = 1990; // Leave margin for safety
 
     if (text.length <= maxLen) {
@@ -480,7 +484,7 @@ export class DiscordAdapter {
   /**
    * Send a single message with automatic retry on Discord 429 rate limits.
    */
-  private async sendWithRateLimit(channel: TextChannel, text: string): Promise<void> {
+  private async sendWithRateLimit(channel: DiscordWritableChannel, text: string): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         await channel.send(text);
@@ -503,7 +507,7 @@ export class DiscordAdapter {
    */
   async handleJobCompletion(job: Job): Promise<void> {
     const channelId = job.channelId;
-    const channel = this.client.channels.cache.get(channelId) as TextChannel | undefined;
+    const channel = this.client.channels.cache.get(channelId) as unknown as DiscordWritableChannel | undefined;
     if (!channel) {
       log.adapter.warn({ jobId: job.id, channelId }, "Job completed but channel not found");
       return;
@@ -539,7 +543,7 @@ export class DiscordAdapter {
       notification += ` Error: ${job.error ?? "unknown"}`;
     }
 
-    log.adapter.info({ jobId: job.id, channel: channel.name, preview: notification.slice(0, 120) }, "Sending job notification");
+    log.adapter.info({ jobId: job.id, channel: channelId, preview: notification.slice(0, 120) }, "Sending job notification");
 
     const release = await this.mutex.acquire(channelId);
     const streamHandler = new DiscordStreamHandler(channel);
