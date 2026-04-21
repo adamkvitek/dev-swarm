@@ -9,7 +9,15 @@ function createMockJobManager(): JobManager {
   const jobs = new Map<string, Job>();
   return {
     createWorkerJob: (_ch: string, _st: unknown[], _ts: string[], _rp: string) => {
-      const job: Job = { id: "job-123", channelId: "ch1", type: "workers", status: "running", createdAt: Date.now(), subtasks: [] };
+      const job: Job = {
+        id: "job-123",
+        channelId: "ch1",
+        type: "workers",
+        mode: "standard",
+        status: "running",
+        createdAt: Date.now(),
+        subtasks: [],
+      };
       jobs.set(job.id, job);
       return job;
     },

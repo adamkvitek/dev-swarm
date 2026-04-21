@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnv } from "./config/env.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -12,6 +13,8 @@ const ROOT = resolve(__dirname, "..");
  * Usage: npm run dev-swarm
  */
 async function main(): Promise<void> {
+  const env = loadEnv();
+
   // 1. Start the server in the background (no shell — direct Node spawn)
   console.log("Starting dev-swarm server...");
   // Use tsx's CLI entry point directly — avoids platform-specific
@@ -31,7 +34,7 @@ async function main(): Promise<void> {
   let ready = false;
   for (let i = 0; i < 30; i++) {
     try {
-      const res = await fetch("http://127.0.0.1:9847/health");
+      const res = await fetch(`http://${env.MCP_API_HOST}:${env.MCP_API_PORT}/health`);
       if (res.ok) { ready = true; break; }
     } catch { /* not ready yet */ }
     await new Promise((r) => setTimeout(r, 1000));
@@ -56,7 +59,7 @@ async function main(): Promise<void> {
   console.log("Server ready. Launching Claude Code...\n");
 
   // 3. Launch Claude Code — NO shell:true (preserves terminal properly)
-  const claude = spawn("claude", [
+  const claude = spawn(env.CLAUDE_CLI, [
     "--mcp-config", mcpConfigPath,
     "--append-system-prompt", shortPrompt,
   ], {

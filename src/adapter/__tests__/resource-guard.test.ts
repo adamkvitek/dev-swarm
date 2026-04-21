@@ -415,7 +415,8 @@ describe("ResourceGuard", () => {
 
     it("should stop periodic checks when stopMonitoring is called", () => {
       let workers = 0;
-      const guard = new ResourceGuard(80, 4, () => workers);
+      // Use 99% ceilings so host load cannot trigger unrelated warnings.
+      const guard = new ResourceGuard(99, 4, () => workers, 99);
       const transitions: ResourceTransition[] = [];
       guard.startMonitoring((t) => transitions.push(t), 1000);
       vi.advanceTimersByTime(2000);

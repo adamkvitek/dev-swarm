@@ -365,7 +365,7 @@ describe("Job Queuing", () => {
     it("should queue council jobs when at capacity (3x multiplier)", () => {
       const councilWorker = makeCouncilWorker();
       mgr = new JobManager(
-        makeEnv(2), // max 2 workers => council limit is 2*3 = 6
+        makeEnv(2), // max 2 worker slots => each council subtask costs 3 slots
         workerCtrl.agent,
         makeReviewerAgent(),
         worktreeManager,
@@ -373,21 +373,17 @@ describe("Job Queuing", () => {
         councilWorker,
       );
 
-      // Council limit = MAX_CONCURRENT_WORKERS * 3 = 6.
-      // getActiveWorkerCount() counts subtasks from running worker jobs.
-      // First council job: 2 subtasks → active count becomes 2, needed = 2*3 = 6.
-      // Check: 0 + 6 <= 6 → starts (barely fits).
-      const job1 = mgr.createCouncilJob("ch1", [makeSubtask("1"), makeSubtask("2")], ["TS"], "/tmp/repo");
+      // First council job: 1 subtask → costs 3 slots, which already exceeds the
+      // configured capacity of 2 worker slots.
+      const job1 = mgr.createCouncilJob("ch1", [makeSubtask("1")], ["TS"], "/tmp/repo");
       expect("error" in job1).toBe(false);
-      expect((job1 as Job).status).toBe("running");
+      expect((job1 as Job).status).toBe("queued");
+      expect(mgr.getQueueDepth()).toBe(1);
 
-      // Now activeCount = 2 (job1 has 2 subtasks and is running).
-      // Second council job: 1 subtask, needed = 1*3 = 3. Check: 2 + 3 = 5 <= 6 → fits.
-      // We need a job that would exceed: e.g., 2 subtasks → needed = 6. Check: 2 + 6 = 8 > 6 → queues.
-      const job2 = mgr.createCouncilJob("ch1", [makeSubtask("3"), makeSubtask("4")], ["TS"], "/tmp/repo");
+      const job2 = mgr.createCouncilJob("ch1", [makeSubtask("2")], ["TS"], "/tmp/repo");
       expect("error" in job2).toBe(false);
       expect((job2 as Job).status).toBe("queued");
-      expect(mgr.getQueueDepth()).toBe(1);
+      expect(mgr.getQueueDepth()).toBe(2);
     });
 
     it("should return error when council worker is not configured", () => {
