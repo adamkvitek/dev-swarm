@@ -17,7 +17,7 @@ vi.mock("node:fs", () => ({
 
 // Mock child_process to prevent vm_stat from running — falls back to freemem()
 vi.mock("node:child_process", () => ({
-  execSync: vi.fn(() => { throw new Error("mocked"); }),
+  execFileSync: vi.fn(() => { throw new Error("mocked"); }),
 }));
 
 /**

@@ -1,5 +1,5 @@
 import { freemem, totalmem, platform, cpus as osCpus } from "node:os";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 export interface ResourceSnapshot {
@@ -55,11 +55,19 @@ function sumCpuTimes(cores: { times: CpuTimes }[]): { busy: number; total: numbe
 function getAvailableMemoryBytes(): number {
   if (platform() === "darwin") {
     try {
-      const vmstat = execSync("vm_stat", { encoding: "utf-8", timeout: 2000 });
+      const vmstat = execFileSync("vm_stat", [], {
+        encoding: "utf-8",
+        timeout: 2000,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
       // Page size: prefer sysctl (reliable), fall back to vm_stat header, then 16384
       let pageSize = 16384;
       try {
-        const sysctlOut = execSync("sysctl -n hw.pagesize", { encoding: "utf-8", timeout: 2000 }).trim();
+        const sysctlOut = execFileSync("sysctl", ["-n", "hw.pagesize"], {
+          encoding: "utf-8",
+          timeout: 2000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
         const parsed = parseInt(sysctlOut, 10);
         if (!Number.isNaN(parsed) && parsed > 0) pageSize = parsed;
       } catch {

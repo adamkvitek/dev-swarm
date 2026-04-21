@@ -23,6 +23,7 @@ interface JobBase {
 
 export interface WorkerJob extends JobBase {
   type: "workers";
+  mode: "standard" | "council";
   subtasks: Subtask[];
   workerResults?: WorkerResult[];
 }
@@ -102,7 +103,8 @@ export class JobManager {
     let count = 0;
     for (const job of this.jobs.values()) {
       if (job.type === "workers" && job.status === "running") {
-        count += job.subtasks.length;
+        const weight = job.mode === "council" ? 3 : 1;
+        count += job.subtasks.length * weight;
       }
     }
     return count;
@@ -119,6 +121,7 @@ export class JobManager {
       id: randomUUID(),
       channelId,
       type: "workers",
+      mode: "standard",
       status: "queued",
       createdAt: Date.now(),
       subtasks,
@@ -128,10 +131,11 @@ export class JobManager {
 
     // Try to start immediately; if at capacity, queue it
     const activeCount = this.getActiveWorkerCount();
-    if (activeCount + subtasks.length > this.env.MAX_CONCURRENT_WORKERS) {
+    const needed = subtasks.length;
+    if (activeCount + needed > this.env.MAX_CONCURRENT_WORKERS) {
       this.pendingQueue.push({ job, techStack, previousFeedback, isCouncil: false });
       log.jobMgr.info(
-        { jobId: job.id, active: activeCount, needed: subtasks.length, max: this.env.MAX_CONCURRENT_WORKERS, queueDepth: this.pendingQueue.length },
+        { jobId: job.id, active: activeCount, needed, max: this.env.MAX_CONCURRENT_WORKERS, queueDepth: this.pendingQueue.length },
         "Job queued — workers at capacity",
       );
       return job;
@@ -156,6 +160,7 @@ export class JobManager {
       id: randomUUID(),
       channelId,
       type: "workers",
+      mode: "council",
       status: "queued",
       createdAt: Date.now(),
       subtasks,
@@ -166,10 +171,10 @@ export class JobManager {
     // Council uses 3x resources per subtask (3 models)
     const activeCount = this.getActiveWorkerCount();
     const needed = subtasks.length * 3;
-    if (activeCount + needed > this.env.MAX_CONCURRENT_WORKERS * 3) {
+    if (activeCount + needed > this.env.MAX_CONCURRENT_WORKERS) {
       this.pendingQueue.push({ job, techStack, previousFeedback, isCouncil: true });
       log.jobMgr.info(
-        { jobId: job.id, active: activeCount, needed, max: this.env.MAX_CONCURRENT_WORKERS * 3, queueDepth: this.pendingQueue.length },
+        { jobId: job.id, active: activeCount, needed, max: this.env.MAX_CONCURRENT_WORKERS, queueDepth: this.pendingQueue.length },
         "Council job queued — at capacity",
       );
       return job;
@@ -322,7 +327,7 @@ export class JobManager {
       if (!next) break;
       const activeCount = this.getActiveWorkerCount();
       const needed = next.isCouncil ? next.job.subtasks.length * 3 : next.job.subtasks.length;
-      const max = next.isCouncil ? this.env.MAX_CONCURRENT_WORKERS * 3 : this.env.MAX_CONCURRENT_WORKERS;
+      const max = this.env.MAX_CONCURRENT_WORKERS;
 
       if (activeCount + needed > max) break; // Still at capacity
 
